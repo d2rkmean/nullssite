@@ -21,7 +21,7 @@
 
 <header class="text-center py-3 px-3">
   <h1 class="fw-bold mb-1" style="font-size:1.6rem">🎮 Генератор модов <span style="color:var(--accent)">Null's Brawl</span></h1>
-  <p class="text-muted-2 mb-2 small">Создавай моды быстро и красиво ✨</p>
+  <p class="text-muted-2 mb-2 small">Редактор мода</p>
 </header>
 
 <main class="flex-fill">
@@ -30,18 +30,18 @@
       <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#visual-pane" type="button">Основное</button></li>
       <li class="nav-item"><button class="nav-link" id="features-tab" data-bs-toggle="pill" data-bs-target="#features-pane" type="button">Возможности</button></li>
       <li class="nav-item"><button class="nav-link" id="objects-tab" data-bs-toggle="pill" data-bs-target="#objects-pane" type="button">Объекты</button></li>
-      <li class="nav-item"><button class="nav-link" id="tables-tab" data-bs-toggle="pill" data-bs-target="#tables-pane" type="button">Таблицы</button></li>
+      <li class="nav-item"><button class="nav-link" id="tables-tab" data-bs-toggle="pill" data-bs-target="#tables-pane" type="button">Таблицы (BETA)</button></li>
       <li class="nav-item"><button class="nav-link" id="code-tab" data-bs-toggle="pill" data-bs-target="#code-pane" type="button">JSON</button></li>
     </ul>
 
     <div class="tab-content" id="tabContent">
 
-      <!-- ===================== TAB: ОСНОВНОЕ ===================== -->
+      
       <div class="tab-pane fade show active" id="visual-pane" role="tabpanel">
         <div class="row g-3 justify-content-center">
           <div class="col-12 col-lg-8 d-flex flex-column gap-3">
 
-            <!-- Preview -->
+            
             <div class="card soft">
               <div class="card-body p-0">
                 <div class="mod-preview" id="mod-preview">
@@ -51,7 +51,7 @@
                       <img id="preview-icon" src="" alt="" class="mod-preview-icon d-none">
                       <div>
                         <div class="preview-title" id="preview-mod-title">Название мода</div>
-                        <div class="preview-author" id="preview-mod-author">Автор: Не указан</div>
+                        <div class="preview-author" id="preview-mod-author"><span class="text-muted-2">Автор: </span><span class="preview-html">Не указан</span></div>
                       </div>
                     </div>
                     <div class="preview-description" id="preview-mod-description">Описание мода</div>
@@ -60,7 +60,7 @@
               </div>
             </div>
 
-            <!-- Meta info -->
+            
             <div class="card soft">
               <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -68,60 +68,67 @@
                   <div class="d-flex align-items-center gap-2">
                     <label for="language-select" class="form-label mb-0 small text-muted-2">Язык:</label>
                     <select id="language-select" class="form-select form-select-sm form-select-dark d-inline-block" style="width:auto"></select>
-                    <small class="text-warning fw-semibold d-none d-sm-block" style="font-size:.75rem">Используйте EN для одного языка</small>
+                    <small class="text-warning fw-semibold d-none d-sm-block" style="font-size:.75rem">EN — один язык</small>
                   </div>
                 </div>
                 <div class="row g-2">
                   <div class="col-12 col-md-6">
-                    <label class="form-label small text-muted-2">Название (@title) <span class="text-danger">*</span></label>
-                    <input type="text" id="meta-title" class="form-control form-control-dark" placeholder="Например: My Awesome Mod">
+                    <label class="form-label small text-muted-2">@title <span class="text-danger">*</span></label>
+                    <input type="text" id="meta-title" class="form-control form-control-dark" placeholder="">
                   </div>
                   <div class="col-12 col-md-6">
-                    <label class="form-label small text-muted-2">Автор (@author)</label>
-                    <input type="text" id="meta-author" class="form-control form-control-dark" placeholder="Ваш никнейм">
+                    <label class="form-label small text-muted-2">@author</label>
+                    <input type="text" id="meta-author" class="form-control form-control-dark" placeholder="">
+                    <div class="form-text text-muted-2 small">HTML</div>
                   </div>
                   <div class="col-12">
-                    <label class="form-label small text-muted-2">Описание (@description) <span class="text-danger">*</span> <span class="text-muted-2 small">— допускается HTML</span></label>
-                    <textarea id="meta-description" class="form-control form-control-dark" rows="3" placeholder="Опишите ваш мод..."></textarea>
+                    <label class="form-label small text-muted-2">@description <span class="text-danger">*</span></label>
+                    <textarea id="meta-description" class="form-control form-control-dark" rows="3" placeholder="HTML ок"></textarea>
                   </div>
                   <div class="col-6 col-md-4">
-                    <label class="form-label small text-muted-2">Версия (@version)</label>
+                    <label class="form-label small text-muted-2">@version</label>
                     <input type="text" id="meta-version" class="form-control form-control-dark" placeholder="1.0.0">
                   </div>
                   <div class="col-6 col-md-4">
-                    <label class="form-label small text-muted-2">Версия игры (@gv) <span class="text-muted-2 small">— необязательно</span></label>
+                    <label class="form-label small text-muted-2">@gv</label>
                     <input type="number" id="meta-gv" class="form-control form-control-dark" placeholder="не указано">
                   </div>
+                  <div class="col-12">
+                    <div class="form-check form-switch mb-2">
+                      <input class="form-check-input" type="checkbox" id="auto-root-patches" checked>
+                      <label class="form-check-label small text-muted-2" for="auto-root-patches">Авто @root и @patches (иначе — из content.json / импорта)</label>
+                    </div>
+                  </div>
                   <div class="col-12 col-md-4">
-                    <label class="form-label small text-muted-2">Корневая папка (@root)</label>
-                    <input type="text" id="meta-root" class="form-control form-control-dark" placeholder="">
+                    <label class="form-label small text-muted-2">@root</label>
+                    <input type="text" id="meta-root" class="form-control form-control-dark" placeholder="" readonly style="opacity:.9">
                   </div>
                   <div class="col-12">
-                    <label class="form-label small text-muted-2">Патчи (@patches) <span class="text-muted-2 small">— формируются автоматически из JSON в <code>json/moddata/json/</code></span></label>
+                    <label class="form-label small text-muted-2">@patches</label>
                     <input type="text" id="meta-patches" class="form-control form-control-dark" placeholder="" readonly style="opacity:.9">
                   </div>
-                  <!-- Categories -->
+                  
                   <div class="col-12">
-                    <label class="form-label small text-muted-2">Категории (@categories)</label>
+                    <label class="form-label small text-muted-2">@categories</label>
                     <div class="d-flex gap-2 flex-wrap mb-2" id="categories-display"></div>
                     <select id="categories-select" class="form-select form-select-dark form-select-sm" style="max-width:260px">
                       <option value="">— выбрать категорию —</option>
                       <option value="skins">Скины</option>
-                      <option value="gameplay">Геймплей</option>
-                      <option value="maps">Карты</option>
-                      <option value="audio">Аудио</option>
-                      <option value="ui">Интерфейс</option>
-                      <option value="brawlers">Бравлеры</option>
-                      <option value="animations">Анимации</option>
-                      <option value="effects">Эффекты</option>
-                      <option value="other">Другое</option>
+                      <option value="environments">Окружения</option>
+                      <option value="shader">Шейдеры</option>
+                      <option value="gui">Интерфейс (UI)</option>
+                      <option value="texts">Локализации</option>
+                      <option value="music">Музыка</option>
+                      <option value="sfx">Звуковые эффекты</option>
+                      <option value="performance">Производительность</option>
+                      <op
                     </select>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Icon -->
+            
             <div class="card soft">
               <div class="card-body d-flex align-items-center gap-3 flex-wrap">
                 <div class="flex-shrink-0">
@@ -130,7 +137,7 @@
                 </div>
                 <div class="flex-grow-1">
                   <h5 class="section-title mb-1">Иконка мода</h5>
-                  <p class="text-muted-2 small mb-2">Рекомендуется 640×640, формат .png</p>
+                  <p class="text-muted-2 small mb-2">PNG, ~640×640</p>
                   <div class="d-flex gap-2 flex-wrap">
                     <label for="mod-icon" class="btn btn-outline-light mb-0">📁 Загрузить</label>
                     <input type="file" id="mod-icon" class="d-none" accept="image/png,image/jpg,image/jpeg,image/webp">
@@ -140,14 +147,14 @@
               </div>
             </div>
 
-            <!-- Files -->
+            
             <div class="card soft">
               <div class="card-body">
                 <h5 class="section-title mb-3">Файлы мода</h5>
                 <div class="d-flex gap-2 flex-wrap mb-3 align-items-end">
                   <select id="folder-select" class="form-select form-select-dark flex-grow-1" style="max-width:200px"></select>
                   <div style="max-width:220px">
-                    <label class="form-label small text-muted-2 mb-0">Каталог <code>json/moddata/files/…</code></label>
+                    <label class="form-label small text-muted-2 mb-0">Каталог <code>json/mods/files/…</code></label>
                     <select id="file-moddata-scope" class="form-select form-select-dark form-select-sm"></select>
                   </div>
                   <label for="file-input" class="btn btn-primary glow mb-0">➕ Добавить файлы</label>
@@ -157,12 +164,12 @@
               </div>
             </div>
 
-            <!-- objectTable download -->
+            
             <div class="card soft">
               <div class="card-body">
-                <h5 class="section-title mb-1">База объектов</h5>
-                <p class="text-muted-2 small mb-3">Нужна для редактора объектов. Скачивается при первом запуске автоматически.</p>
-                <button id="download-object-table" class="btn btn-info glow w-100">🔄 Скачать / Обновить objectTable.json</button>
+                <h5 class="section-title mb-1">objectTable</h5>
+                <p class="text-muted-2 small mb-3">~14&nbsp;МБ, IndexedDB. Кнопка — скачать; без автозагрузки.</p>
+                <button id="download-object-table" class="btn btn-info glow w-100">Скачать objectTable.json</button>
                 <div id="progress-container" class="d-none mt-3">
                   <div class="progress"><div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" style="width:0%">0%</div></div>
                 </div>
@@ -177,13 +184,13 @@
         </div>
       </div>
 
-      <!-- ===================== TAB: ВОЗМОЖНОСТИ ===================== -->
+      
       <div class="tab-pane fade" id="features-pane" role="tabpanel">
         <div class="card soft mb-3">
           <div class="card-body">
             <h5 class="section-title mb-3">Возможности мода (@features)</h5>
 
-            <!-- Add feature form -->
+            
             <div class="p-3 mb-4" style="background:rgba(15,19,28,.4);border-radius:16px;border:1px solid var(--line)">
               <div class="row g-2 align-items-end">
                 <div class="col-12 col-md-5">
@@ -209,7 +216,7 @@
 
             <div id="features-list" class="mb-4"></div>
 
-            <!-- Feature Groups -->
+            
             <h5 class="section-title mb-3">Группы возможностей (@feature_groups)</h5>
             <div class="p-3 mb-3" style="background:rgba(15,19,28,.4);border-radius:16px;border:1px solid var(--line)">
               <div class="row g-2 align-items-end">
@@ -231,8 +238,8 @@
             </div>
             <div id="feature-groups-list" class="mb-4"></div>
 
-            <!-- Raw JSON editor for features -->
-            <p class="text-muted-2 small mb-2">Для каждой возможности — отдельный JSON-файл при экспорте; ниже редактор по выбранной фиче.</p>
+            
+            <p class="text-muted-2 small mb-2">JSON фичи — отдельный файл в ZIP.</p>
             <div class="row g-2 mb-2 align-items-end">
               <div class="col-12 col-md-6">
                 <label class="form-label small text-muted-2">Редактировать JSON фичи</label>
@@ -248,42 +255,48 @@
         </div>
       </div>
 
-      <!-- ===================== TAB: ОБЪЕКТЫ ===================== -->
+      
       <div class="tab-pane fade" id="objects-pane" role="tabpanel">
         <div class="card soft mb-3">
           <div class="card-body">
-            <h5 class="section-title mb-3">Редактор объектов</h5>
+            <h5 class="section-title mb-3">Объекты</h5>
             <div class="d-flex gap-2 flex-wrap mb-3 align-items-end">
               <div class="flex-grow-1" style="max-width:220px">
                 <label class="form-label small text-muted-2 mb-1">Область данных</label>
                 <select id="object-scope" class="form-select form-select-dark"></select>
               </div>
-              <div class="custom-select-container flex-grow-1" style="max-width:280px">
-                <label class="form-label small text-muted-2 mb-1">Таблица</label>
-                <input type="text" id="add-object-group" class="form-control form-control-dark" placeholder="Поиск таблицы...">
-                <div class="options-container" id="add-object-group-options"></div>
+              <div class="d-flex gap-1 align-items-end flex-grow-1" style="max-width:320px">
+                <div class="flex-grow-1">
+                  <label class="form-label small text-muted-2 mb-1">Таблица</label>
+                  <input type="text" id="add-object-group" class="form-control form-control-dark" placeholder="" readonly style="opacity:.9">
+                </div>
+                <button type="button" id="add-object-group-pick" class="btn btn-outline-light mb-0" title="Выбрать">▾</button>
               </div>
-              <button id="add-object-btn" class="btn btn-primary glow">Добавить объект</button>
+              <button id="add-object-btn" class="btn btn-primary glow">Объект</button>
+            </div>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="hint-file-paths" checked>
+              <label class="form-check-label small text-muted-2" for="hint-file-paths">Подсказки путей для строковых параметров (<code>json/mods/files/…</code>)</label>
             </div>
 
-            <!-- Group tabs -->
+            
             <div class="group-selector" id="group-selector"></div>
 
-            <!-- Selected group content -->
+            
             <div id="selected-group-pane"></div>
           </div>
         </div>
       </div>
 
-      <!-- ===================== TAB: ТАБЛИЦЫ ===================== -->
+      
       <div class="tab-pane fade" id="tables-pane" role="tabpanel">
         <div class="card soft mb-3">
           <div class="card-body">
-            <h5 class="section-title mb-2">Редактор таблиц CSV</h5>
-            <p class="text-muted-2 small mb-3">Выберите CSV-таблицу, внесите изменения — они автоматически попадут в JSON (TablePatches).</p>
+            <h5 class="section-title mb-2">CSV</h5>
+            <p class="text-muted-2 small mb-3">Список — из objectTable. Загрузка: сеть или файл.</p>
             <div class="d-flex gap-2 mb-3 flex-wrap">
               <select id="csv-table-select" class="form-select form-select-dark flex-grow-1" style="max-width:300px">
-                <option value="">— выбрать таблицу —</option>
+                <option value="">—</option>
               </select>
               <button id="load-csv-btn" class="btn btn-info glow">Загрузить</button>
               <label for="csv-upload-input" class="btn btn-outline-light mb-0">📂 Загрузить локально</label>
@@ -294,8 +307,12 @@
               <div class="csv-table-wrapper" id="csv-table-scroll">
                 <table class="csv-table" id="csv-table"></table>
               </div>
-              <div class="d-flex justify-content-end mt-3">
-                <button id="apply-csv-btn" class="btn btn-success glow">Применить изменения в JSON</button>
+              <div class="d-flex flex-wrap gap-2 align-items-end justify-content-between mt-3">
+                <div style="min-width:200px;max-width:100%">
+                  <label class="form-label small text-muted-2 mb-0">В фичу</label>
+                  <select id="csv-apply-scope" class="form-select form-select-dark form-select-sm"></select>
+                </div>
+                <button id="apply-csv-btn" class="btn btn-success glow">В JSON</button>
               </div>
             </div>
             <div id="csv-empty-state" class="text-center text-muted-2 py-4">
@@ -306,12 +323,12 @@
         </div>
       </div>
 
-      <!-- ===================== TAB: JSON ===================== -->
+      
       <div class="tab-pane fade" id="code-pane" role="tabpanel">
         <div class="card soft mb-3">
           <div class="card-body">
-            <h5 class="section-title mb-3">Редактор JSON (только ключи @ для content.json)</h5>
-            <p class="text-muted-2 small mb-2">Таблицы объектов и тела фич хранятся в отдельных JSON под <code>json/moddata/json/</code> и попадают в ZIP через @patches.</p>
+            <h5 class="section-title mb-3">content.json</h5>
+            <p class="text-muted-2 small mb-2">Только ключи <code>@</code>. Патчи: <code>json/mods/root.json</code>, <code>json/mods/configs/*.json</code>.</p>
             <div id="editor" class="code-editor"></div>
             <div class="d-flex justify-content-end gap-2 mt-3">
               <button id="format-json" class="btn btn-outline-light">Форматировать</button>

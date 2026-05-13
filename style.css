@@ -31,7 +31,7 @@
     .text-muted-2{color:var(--muted)!important}
     .card.soft{
       background:var(--gradient-card);border:1px solid var(--line);border-radius:20px;
-      box-shadow:var(--shadow-lg);color:#fff;backdrop-filter:blur(10px);
+      box-shadow:var(--shadow-lg);color:#fff;
       transition:all var(--transition-normal);position:relative;overflow:hidden;
     }
     .card.soft::before{
@@ -45,7 +45,7 @@
     }
     .form-control-dark,.form-select-dark{
       background:rgba(15,19,28,.8);border:1px solid var(--line);color:#fff;
-      border-radius:12px;transition:all var(--transition-normal);backdrop-filter:blur(10px);
+      border-radius:12px;transition:all var(--transition-normal);
     }
     .form-control-dark::placeholder{color:var(--muted)}
     .form-control-dark:focus,.form-select-dark:focus{
@@ -60,7 +60,7 @@
     }
     .nav-pills{
       background:rgba(255,255,255,.04);border:1px solid var(--line);
-      border-radius:20px;padding:6px;backdrop-filter:blur(20px);
+      border-radius:20px;padding:6px;
       flex-wrap:wrap;gap:4px;
     }
     .nav-pills .nav-link{color:#fff;border-radius:14px;transition:all var(--transition-normal);font-size:.9rem;padding:6px 14px}
@@ -77,7 +77,7 @@
     .objects-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
     .object-card{
       background:rgba(15,19,28,.6);border:1px solid var(--line);border-radius:16px;
-      padding:16px;transition:all var(--transition-normal);backdrop-filter:blur(10px);
+      padding:16px;transition:all var(--transition-normal);
     }
     .object-card:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:var(--shadow-lg),var(--shadow-glow)}
     .param-pill{
@@ -130,6 +130,9 @@
     .preview-description.preview-html{white-space:normal}
     .preview-description.preview-html a{color:var(--accent-light)}
     .preview-description.preview-html img{max-width:100%;border-radius:8px}
+    .preview-author .preview-html{white-space:normal;font-style:normal}
+    .preview-author .preview-html a{color:var(--accent-light)}
+    .preview-author .preview-html img{max-width:100%;border-radius:8px;vertical-align:middle}
     .preview-no-icon{
       width:72px;height:72px;border-radius:14px;background:rgba(255,255,255,.1);
       display:flex;align-items:center;justify-content:center;font-size:2rem;flex-shrink:0;
@@ -181,7 +184,7 @@
     .cat-pill-remove{background:none;border:none;color:var(--danger);cursor:pointer;font-size:.95rem;padding:0;line-height:1}
 
     /* Modal */
-    .modal-content.soft{background:var(--gradient-card);color:#fff;border:1px solid var(--line);border-radius:20px;backdrop-filter:blur(20px);box-shadow:var(--shadow-xl)}
+    .modal-content.soft{background:var(--gradient-card);color:#fff;border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow-xl)}
     .modal-header{border-bottom:1px solid var(--line)}
     .modal-footer{border-top:1px solid var(--line)}
     .modal-title{background:var(--gradient-primary);background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent}
@@ -196,10 +199,14 @@
     .options-container{
       position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--card);
       border:1px solid var(--line);border-radius:12px;margin-top:6px;max-height:200px;
-      overflow-y:auto;display:none;padding:6px;backdrop-filter:blur(20px);box-shadow:var(--shadow-lg);
+      overflow-y:auto;display:none;padding:6px;box-shadow:var(--shadow-lg);
     }
     .options-container .option-item{padding:10px 14px;cursor:pointer;color:#fff;border-radius:8px;transition:all var(--transition-fast);font-size:.9rem}
     .options-container .option-item:hover,.options-container .option-item.selected{background:var(--gradient-primary);color:#fff}
+
+    .modal-pick-option{cursor:pointer;border-radius:8px;padding:8px 12px;transition:background .12s,border-color .12s;border:1px solid transparent}
+    .modal-pick-option:hover:not(.selected){background:rgba(255,255,255,.06)}
+    .modal-pick-option.selected{background:rgba(100,181,246,.18);border-color:var(--accent);font-weight:600}
 
     /* Scrollbar */
     ::-webkit-scrollbar{width:7px;height:7px}

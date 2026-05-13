@@ -1,8 +1,10 @@
-// ============================================================
-// GLOBALS
-// ============================================================
+
+
+
 let schema = {}, GROUP_KEYS = [], PARAMS_BY_GROUP = {}, OBJECT_EXAMPLES_BY_GROUP = {}, TYPE_BY_PARAM_BY_GROUP = {};
 let csvData = {};
+
+let csvBaseline = {};
 let currentCsvName = null;
 let csvVirtualScrollCleanup = null;
 let objectsVirtualScrollCleanup = null;
@@ -18,14 +20,46 @@ let selectedFeatureJsonId = "";
 let objectScope = "";
 let activeGroupKey = null;
 
+let autoRootPatches = true;
+
+let hintFilePathsEnabled = true;
+
 const KNOWN_LANGUAGES = ["en", "ru", "zh", "es", "pt", "tr", "fr", "de", "ar"];
-const KNOWN_FOLDERS = ["movie","font","json","music","sc","sc3d","sfx","shader"];
+const KNOWN_FOLDERS = ["movie","font","json","toml","music","sc","sc3d","sfx","shader"];
 const DB_NAME = "mod-gen-db-v2", DB_VERSION = 4;
 const STORE_NAME = "files", CSV_STORE = "csvtables", SCHEMA_STORE = "objectTableBlob", STATE_STORE = "modState";
-const PATH_ROOT_JSON = "json/moddata/json/root.json";
-const pathFeatureJson = id => `json/moddata/json/${id}.json`;
+
+const MOD_JSON_ROOT = "/json/mods";
+const MODS_FILES_PREFIX = "json/mods/files";
+const patchPathRootJson = () => `${MOD_JSON_ROOT}/root.json`;
+const patchPathFeatureJson = id => `${MOD_JSON_ROOT}/configs/${id}.json`;
+function patchToZipPath(patch) { return String(patch || "").replace(/^\/+/, ""); }
+function zipPathModsFiles(featureId, fileName) {
+  return `${MODS_FILES_PREFIX}/${featureId}/${fileName}`;
+}
+
+function isPatchJsonZipPath(norm) {
+  const n = norm.replace(/^\/+/, "").replace(/\\/g, "/");
+  if (n === "json/mods/root.json") return true;
+  if (n.startsWith("json/moddata/json/") && n.toLowerCase().endsWith(".json")) return true;
+  if (n.startsWith("json/mods/configs/") && n.toLowerCase().endsWith(".json")) return true;
+  if (n.startsWith("json/mods/") && n.toLowerCase().endsWith(".json") && !n.startsWith("json/mods/files/")) return true;
+  return false;
+}
+
+function patchJsonRouteId(norm) {
+  const n = norm.replace(/^\/+/, "").replace(/\\/g, "/");
+  if (n.endsWith("/root.json") || n === "json/mods/root.json") return "root";
+  const mc = n.match(/\/configs\/([^/]+)\.json$/i);
+  if (mc) return mc[1];
+  return n.split("/").pop().replace(/\.json$/i, "");
+}
 const FILES_SCOPE_OFF = "__off__";
 const RANDOM_ACCENTS = ["#2196f3","#4caf50","#f44336","#fbc02d"];
+
+const REMOTE_OBJECT_TABLE_URL = "https://d2rkmean.github.io/nullssite/assets/objectTable.json";
+
+const REMOTE_CSV_BASE = "https://d2rkmean.github.io/nullssite/assets/csvs/";
 
 function pickRandomAccent() { return RANDOM_ACCENTS[Math.floor(Math.random() * RANDOM_ACCENTS.length)]; }
 
@@ -127,15 +161,54 @@ async function loadModStateFromDb() {
 }
 
 async function saveCsvToDb(name, text) { await dbPut(CSV_STORE, { name, text }); }
+function cloneCsvTable(src) {
+  if (!src || !src.headers) return { headers: [], rows: [] };
+  return { headers: [...src.headers], rows: src.rows.map(row => [...row]) };
+}
+function setCsvBaseline(name) {
+  if (!name || !csvData[name]) return;
+  csvBaseline[name] = cloneCsvTable(csvData[name]);
+}
+function ensureCsvBaseline(name) {
+  if (!name || !csvData[name]) return;
+  if (!csvBaseline[name]) setCsvBaseline(name);
+}
+
 async function loadAllCsvFromDb() {
   const rows = await dbGetAll(CSV_STORE);
-  rows.forEach(r => { csvData[r.name] = parseCSV(r.text); populateCsvSelect(); });
+  rows.forEach(r => {
+    csvData[r.name] = parseCSV(r.text);
+    setCsvBaseline(r.name);
+    populateCsvSelect();
+  });
 }
 
 const debounce = (fn, ms = 400) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+function isJsonTabActive() {
+  const el = document.getElementById("code-pane");
+  return el && el.classList.contains("active") && el.classList.contains("show");
+}
+
+
+function attachPassiveRafScroll(el, handler) {
+  let scheduled = false;
+  const onScroll = () => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      handler();
+    });
+  };
+  el.addEventListener("scroll", onScroll, { passive: true });
+  return () => el.removeEventListener("scroll", onScroll);
+}
 const autoSave = debounce(async () => {
   try {
-    localStorage.setItem("mod-gen-v2", JSON.stringify({ model, currentLanguage, objectScope }));
+    localStorage.setItem("mod-gen-v2", JSON.stringify({
+      model, currentLanguage, objectScope, autoRootPatches, hintFilePathsEnabled
+    }));
   } catch (e) { toast("Не удалось сохранить в localStorage: " + e.message, "error"); }
   try { await saveModStateToDb(); } catch (e) {}
 }, 800);
@@ -158,6 +231,8 @@ async function loadState() {
       if (d.model) migrateLegacyModelIntoPatches(d.model);
       currentLanguage = d.currentLanguage || "en";
       objectScope = d.objectScope || "";
+      if (typeof d.autoRootPatches === "boolean") autoRootPatches = d.autoRootPatches;
+      if (typeof d.hintFilePathsEnabled === "boolean") hintFilePathsEnabled = d.hintFilePathsEnabled;
     } catch (e) {}
   }
   const stored = await dbGetAll(STORE_NAME);
@@ -206,22 +281,30 @@ function computeAutoPatches() {
     const b = rootPatchData[t];
     return b && typeof b === "object" && Object.keys(b).length > 0;
   });
-  if (rootHas) p.push(PATH_ROOT_JSON);
+  if (rootHas) p.push(patchPathRootJson());
   for (const fid of Object.keys(model["@features"] || {})) {
     const fd = featureFileData[fid];
-    if (fd && typeof fd === "object" && Object.keys(fd).length > 0) p.push(pathFeatureJson(fid));
+    if (fd && typeof fd === "object" && Object.keys(fd).length > 0) p.push(patchPathFeatureJson(fid));
   }
   return [...new Set(p)];
 }
 
-function syncPatchesField() {
+function applyAutoRootPatchesToModel() {
+  if (!autoRootPatches) return;
+  model["@root"] = MOD_JSON_ROOT;
   model["@patches"] = computeAutoPatches();
+}
+
+function syncPatchesField() {
+  applyAutoRootPatchesToModel();
   const el = document.getElementById("meta-patches");
-  if (el) el.value = (model["@patches"] || []).join(",");
+  const rootEl = document.getElementById("meta-root");
+  if (el) el.value = (model["@patches"] || []).join(", ");
+  if (rootEl) rootEl.value = model["@root"] || "";
 }
 
 function generateContentJson() {
-  syncPatchesField();
+  applyAutoRootPatchesToModel();
   const j = {};
   if (model["@title"] && Object.keys(model["@title"]).length) j["@title"] = model["@title"];
   if (model["@description"] && Object.keys(model["@description"]).length) j["@description"] = model["@description"];
@@ -236,8 +319,13 @@ function generateContentJson() {
     }
   }
   if (model["@feature_groups"] && Object.keys(model["@feature_groups"]).length) j["@feature_groups"] = JSON.parse(JSON.stringify(model["@feature_groups"]));
-  if (model["@root"]) j["@root"] = model["@root"];
-  if (model["@patches"]?.length) j["@patches"] = model["@patches"];
+  if (autoRootPatches) {
+    j["@root"] = MOD_JSON_ROOT;
+    if (model["@patches"]?.length) j["@patches"] = [...model["@patches"]];
+  } else {
+    if (model["@root"]) j["@root"] = model["@root"];
+    if (Array.isArray(model["@patches"]) && model["@patches"].length) j["@patches"] = [...model["@patches"]];
+  }
   return j;
 }
 
@@ -254,17 +342,24 @@ function tableKeysInBucket(bucket) {
 const cm = CodeMirror(document.getElementById("editor"), { value: "{}", mode: { name: "javascript", json: true }, theme: "material-darker", lineNumbers: true, tabSize: 2, indentUnit: 2, lineWrapping: true });
 let cmFeatureJson = CodeMirror(document.getElementById("single-feature-editor"), { value: "{}", mode: { name: "javascript", json: true }, theme: "material-darker", lineNumbers: true, tabSize: 2, indentUnit: 2, lineWrapping: true });
 
-document.getElementById("code-tab").addEventListener("shown.bs.tab", () => cm.refresh());
+document.getElementById("code-tab").addEventListener("shown.bs.tab", () => {
+  cm.refresh();
+  try {
+    const text = JSON.stringify(generateContentJson(), null, 2);
+    cm.operation(() => { cm.setValue(text); });
+  } catch (e) { cm.setValue("{}"); }
+});
 document.getElementById("features-tab").addEventListener("shown.bs.tab", () => {
   cmFeatureJson.refresh();
   renderFeatures();
   renderFeatureGroups();
   populateFeatureJsonSelect();
+  populateCsvApplyScopeSelect();
   populateFileModdataScopeSelect();
   syncFeatureJsonEditor();
 });
 document.getElementById("objects-tab").addEventListener("shown.bs.tab", () => { updateObjectScopeSelect(); renderGroupsTab(); });
-document.getElementById("tables-tab").addEventListener("shown.bs.tab", () => populateCsvSelect());
+document.getElementById("tables-tab").addEventListener("shown.bs.tab", () => { populateCsvSelect(); populateCsvApplyScopeSelect(); });
 
 function populateLangSelect() {
   const sel = document.getElementById("language-select");
@@ -272,7 +367,7 @@ function populateLangSelect() {
   KNOWN_LANGUAGES.forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l.toUpperCase(); sel.appendChild(o); });
   sel.value = currentLanguage;
 }
-document.getElementById("language-select").addEventListener("change", e => { currentLanguage = e.target.value; loadMeta(model); updateModPreview(); autoSave(); });
+document.getElementById("language-select").addEventListener("change", e => { currentLanguage = e.target.value; loadMeta(model); updateModPreview(); autoSave(); }); 
 
 function renderCategories() {
   const div = document.getElementById("categories-display");
@@ -302,15 +397,35 @@ function loadMeta(meta) {
   const gvEl = document.getElementById("meta-gv");
   if (meta["@gv"] === undefined || meta["@gv"] === null || meta["@gv"] === "") gvEl.value = "";
   else gvEl.value = String(meta["@gv"]);
-  document.getElementById("meta-root").value = meta["@root"] || "";
   syncPatchesField();
-  document.getElementById("meta-patches").value = (model["@patches"] || []).join(",");
   renderCategories();
   updateModPreview();
 }
-document.getElementById("meta-title").addEventListener("input", e => { if (!model["@title"]) model["@title"] = {}; setIntl(model["@title"], currentLanguage, e.target.value); updateModPreview(); debouncedUpdateJson(); });
-document.getElementById("meta-description").addEventListener("input", e => { if (!model["@description"]) model["@description"] = {}; setIntl(model["@description"], currentLanguage, e.target.value); updateModPreview(); debouncedUpdateJson(); });
-document.getElementById("meta-author").addEventListener("input", e => { model["@author"] = e.target.value; updateModPreview(); debouncedUpdateJson(); });
+function updateModPreview() {
+  const title = getIntl(model["@title"] || {}, currentLanguage) || "Название мода";
+  const authorEl = document.getElementById("preview-mod-author");
+  document.getElementById("preview-mod-title").textContent = title;
+  authorEl.replaceChildren();
+  const lab = document.createElement("span");
+  lab.className = "text-muted-2";
+  lab.textContent = "Автор: ";
+  authorEl.appendChild(lab);
+  const box = document.createElement("span");
+  box.className = "preview-html";
+  const rawAuthor = model["@author"] || "";
+  if (rawAuthor.trim()) box.innerHTML = rawAuthor;
+  else { box.classList.add("text-muted-2"); box.textContent = "Не указан"; }
+  authorEl.appendChild(box);
+  const descEl = document.getElementById("preview-mod-description");
+  const rawDesc = getIntl(model["@description"] || {}, currentLanguage) || "Описание мода";
+  descEl.classList.add("preview-html");
+  descEl.innerHTML = rawDesc;
+}
+const debouncedPreview = debounce(updateModPreview, 320);
+
+document.getElementById("meta-title").addEventListener("input", e => { if (!model["@title"]) model["@title"] = {}; setIntl(model["@title"], currentLanguage, e.target.value); debouncedPreview(); debouncedUpdateJson(); });
+document.getElementById("meta-description").addEventListener("input", e => { if (!model["@description"]) model["@description"] = {}; setIntl(model["@description"], currentLanguage, e.target.value); debouncedPreview(); debouncedUpdateJson(); });
+document.getElementById("meta-author").addEventListener("input", e => { model["@author"] = e.target.value; debouncedPreview(); debouncedUpdateJson(); });
 document.getElementById("meta-version").addEventListener("input", e => { model["@version"] = e.target.value; debouncedUpdateJson(); });
 document.getElementById("meta-gv").addEventListener("input", e => {
   const v = e.target.value.trim();
@@ -318,18 +433,6 @@ document.getElementById("meta-gv").addEventListener("input", e => {
   else { const n = parseInt(v, 10); if (!Number.isNaN(n)) model["@gv"] = n; }
   debouncedUpdateJson();
 });
-document.getElementById("meta-root").addEventListener("input", e => { model["@root"] = e.target.value; debouncedUpdateJson(); });
-
-function updateModPreview() {
-  const title = getIntl(model["@title"] || {}, currentLanguage) || "Название мода";
-  const author = model["@author"] || "Не указан";
-  document.getElementById("preview-mod-title").textContent = title;
-  document.getElementById("preview-mod-author").textContent = `Автор: ${author}`;
-  const descEl = document.getElementById("preview-mod-description");
-  const rawDesc = getIntl(model["@description"] || {}, currentLanguage) || "Описание мода";
-  descEl.classList.add("preview-html");
-  descEl.innerHTML = rawDesc;
-}
 
 function showIconPreview(src) {
   document.getElementById("icon-preview").src = src;
@@ -339,27 +442,33 @@ function showIconPreview(src) {
   document.getElementById("preview-icon").classList.remove("d-none");
   document.getElementById("preview-icon-placeholder").classList.add("d-none");
   document.getElementById("remove-icon-btn").classList.remove("d-none");
-  generatePreviewGradient(src);
+  debouncedPreviewGradient(src);
 }
-function generatePreviewGradient(src) {
+
+let previewGradientToken = 0;
+const debouncedPreviewGradient = debounce((src) => {
+  const token = ++previewGradientToken;
   const img = new Image();
-  img.crossOrigin = "Anonymous";
+  img.crossOrigin = "anonymous";
   img.onload = () => {
-    const c = document.createElement("canvas");
-    c.width = c.height = 10;
-    const ctx = c.getContext("2d");
-    ctx.drawImage(img, 0, 0, 10, 10);
-    const d = ctx.getImageData(0, 0, 10, 10).data;
-    let r = 0, g = 0, b = 0, cnt = 0;
-    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; cnt++; }
-    r = Math.round(r / cnt); g = Math.round(g / cnt); b = Math.round(b / cnt);
-    const mid = `rgba(${Math.round(r * .6)},${Math.round(g * .6)},${Math.round(b * .6)},0.25)`;
-    const dark = `rgba(${r},${g},${b},0.15)`;
-    document.getElementById("mod-preview").style.background = `linear-gradient(135deg,${mid} 0%,#0a0d14 60%,${dark} 100%)`;
+    if (token !== previewGradientToken) return;
+    try {
+      const c = document.createElement("canvas");
+      c.width = c.height = 10;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, 10, 10);
+      const d = ctx.getImageData(0, 0, 10, 10).data;
+      let r = 0, g = 0, b = 0, cnt = 0;
+      for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; cnt++; }
+      r = Math.round(r / cnt); g = Math.round(g / cnt); b = Math.round(b / cnt);
+      const mid = `rgba(${Math.round(r * .6)},${Math.round(g * .6)},${Math.round(b * .6)},0.25)`;
+      const dark = `rgba(${r},${g},${b},0.15)`;
+      document.getElementById("mod-preview").style.background = `linear-gradient(135deg,${mid} 0%,#0a0d14 60%,${dark} 100%)`;
+    } catch (e) {}
   };
   img.onerror = () => {};
   img.src = src;
-}
+}, 220);
 
 document.getElementById("mod-icon").addEventListener("change", async e => {
   const f = e.target.files[0]; if (!f) return;
@@ -410,7 +519,7 @@ function populateFileModdataScopeSelect() {
 
 function resolveZipPathForFile(folder, f, scopeSel) {
   if (scopeSel && scopeSel !== FILES_SCOPE_OFF) {
-    return `json/moddata/files/${scopeSel}/${f.name}`;
+    return zipPathModsFiles(scopeSel, f.name);
   }
   return `${folder}/${f.name}`;
 }
@@ -424,18 +533,44 @@ document.getElementById("file-input").addEventListener("change", async e => {
     files.push(entry);
     await dbPut(STORE_NAME, { name: f.name, file: f, type: "modFile", folder, zipPath });
   }
-  renderFiles(); autoSave(); e.target.value = "";
+  renderFiles();
+  if (document.getElementById("objects-pane")?.classList.contains("active")) renderGroupsTab();
+  autoSave(); e.target.value = "";
 });
 
 function renderFiles() {
-  const ul = document.getElementById("files-list"); ul.innerHTML = "";
-  files.forEach((item, idx) => {
+  const ul = document.getElementById("files-list");
+  ul.innerHTML = "";
+  const modsRe = /^json\/mods\/files\/([^/]+)\//;
+  const entries = files.map((item, idx) => ({ item, idx }));
+  entries.sort((a, b) => {
+    const za = a.item.zipPath || "";
+    const zb = b.item.zipPath || "";
+    const ma = za.match(modsRe);
+    const mb = zb.match(modsRe);
+    const ga = ma ? ma[1] : "\uffff";
+    const gb = mb ? mb[1] : "\uffff";
+    if (ga !== gb) return ga.localeCompare(gb);
+    return za.localeCompare(zb);
+  });
+  let lastHeader = null;
+  for (const { item, idx } of entries) {
+    const rel = item.zipPath || (item.subfolder ? `${item.folder}/${item.subfolder}/${item.file.name}` : `${item.folder}/${item.file.name}`);
+    const m = (item.zipPath || "").match(modsRe);
+    const headerKey = m ? m[1] : "__other__";
+    if (headerKey !== lastHeader) {
+      lastHeader = headerKey;
+      const sep = document.createElement("li");
+      sep.className = "list-group-item py-1 px-3 small text-muted-2";
+      sep.style.background = "rgba(0,0,0,.22)";
+      sep.textContent = m ? `${MODS_FILES_PREFIX}/${headerKey}/` : "— вне json/mods/files —";
+      ul.appendChild(sep);
+    }
     const li = document.createElement("li");
     li.className = "list-group-item d-flex justify-content-between align-items-center";
-    const rel = item.zipPath || (item.subfolder ? `${item.folder}/${item.subfolder}/${item.file.name}` : `${item.folder}/${item.file.name}`);
     li.innerHTML = `<span><strong>${rel}</strong></span><button type="button" class="btn btn-sm btn-outline-danger" data-i="${idx}">🗑️</button>`;
     ul.appendChild(li);
-  });
+  }
   ul.querySelectorAll("[data-i]").forEach(btn => btn.addEventListener("click", async ev => {
     const i = parseInt(ev.target.closest("[data-i]").dataset.i, 10);
     files.splice(i, 1);
@@ -446,46 +581,75 @@ function renderFiles() {
   }));
 }
 
-async function fetchObjectTableFromUrls() {
-  const urls = ["http://127.0.0.1:5500/assets/objectTable.json", "res.json", "./objectTable.json", "./res.json"];
-  for (const u of urls) {
-    try {
-      const resp = await fetch(u, { cache: "no-store" });
-      if (resp.ok) return await resp.json();
-    } catch (e) {}
-  }
-  return null;
-}
-
 async function downloadObjectTable() {
   const prog = document.getElementById("progress-container");
   const bar = document.getElementById("progress-bar");
-  prog.classList.remove("d-none"); bar.style.width = "0%"; bar.textContent = "0%";
+  
+  
+  const EXPECTED_SIZE = 14 * 1024 * 1024; 
+
+  prog.classList.remove("d-none");
+  bar.style.width = "0%";
+  bar.textContent = "0%";
+
   try {
-    const resp = await fetch("objectTable.json", { cache: "no-store" });
-    if (!resp.ok) throw new Error("objectTable.json недоступен");
-    const total = parseInt(resp.headers.get("content-length") || "0", 10);
-    let loaded = 0;
-    const chunks = [];
+    const resp = await fetch(REMOTE_OBJECT_TABLE_URL, { cache: "default", mode: "cors" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
     const reader = resp.body.getReader();
+    let loaded = 0;
+    let chunks = [];
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+
       chunks.push(value);
       loaded += value.length;
-      if (total) { const p = Math.round(loaded / total * 100); bar.style.width = p + "%"; bar.textContent = p + "%"; }
+
+      
+      let p = Math.round((loaded / EXPECTED_SIZE) * 100);
+      
+      
+      
+      if (p >= 100) {
+        bar.style.width = "100%";
+        bar.textContent = "Почти готово...";
+      } else {
+        bar.style.width = p + "%";
+        bar.textContent = p + "%";
+      }
     }
+
+    
+    
     const text = await new Blob(chunks).text();
     const data = JSON.parse(text);
+
     processSchema(data);
     await saveObjectTableToDb(data);
-    try { localStorage.removeItem("objectTable"); } catch (e) {}
-    bar.style.width = "100%"; bar.textContent = "100%";
-    setTimeout(() => { prog.classList.add("d-none"); toast("objectTable сохранён в IndexedDB", "success"); }, 400);
-    createSearchableDropdown(document.getElementById("add-object-group"), document.getElementById("add-object-group-options"), GROUP_KEYS, "");
+
+    try { 
+      localStorage.removeItem("objectTable"); 
+    } catch (e) {
+      console.warn("Не удалось очистить localStorage:", e);
+    }
+
+    
+    bar.style.width = "100%";
+    bar.textContent = "100%";
+
+    setTimeout(() => {
+      prog.classList.add("d-none");
+      toast("objectTable сохранён в IndexedDB", "success");
+    }, 400);
+
+    populateCsvSelect();
     updateObjectScopeSelect();
+
   } catch (err) {
     prog.classList.add("d-none");
+    console.error(err);
     toast("Не удалось скачать: " + err.message, "error");
   }
 }
@@ -500,6 +664,13 @@ function processSchema(data) {
 }
 document.getElementById("download-object-table").addEventListener("click", downloadObjectTable);
 
+function syncUiTogglesFromState() {
+  const a = document.getElementById("auto-root-patches");
+  if (a) a.checked = autoRootPatches;
+  const h = document.getElementById("hint-file-paths");
+  if (h) h.checked = hintFilePathsEnabled;
+}
+
 (async function initSchema() {
   let data = await loadObjectTableFromDb();
   if (!data) {
@@ -508,16 +679,20 @@ document.getElementById("download-object-table").addEventListener("click", downl
       if (ls) { data = JSON.parse(ls); localStorage.removeItem("objectTable"); await saveObjectTableToDb(data); }
     } catch (e) {}
   }
-  if (!data) data = await fetchObjectTableFromUrls();
-  if (data) {
-    processSchema(data);
-    const cached = await loadObjectTableFromDb();
-    if (!cached) await saveObjectTableToDb(data);
+  if (!data) {
+    try {
+      const resp = await fetch("./objectTable.json", { cache: "default" });
+      if (resp.ok) {
+        data = await resp.json();
+        await saveObjectTableToDb(data);
+      }
+    } catch (e) {}
   }
+  if (data) processSchema(data);
   populateFolderSelect();
   populateLangSelect();
-  createSearchableDropdown(document.getElementById("add-object-group"), document.getElementById("add-object-group-options"), GROUP_KEYS, "");
   await loadState();
+  syncUiTogglesFromState();
   sanitizeTopModel();
   populateFileModdataScopeSelect();
   loadMeta(model);
@@ -528,6 +703,17 @@ document.getElementById("download-object-table").addEventListener("click", downl
   repaint();
 })();
 
+document.getElementById("auto-root-patches")?.addEventListener("change", ev => {
+  autoRootPatches = ev.target.checked;
+  syncPatchesField();
+  debouncedUpdateJson();
+});
+document.getElementById("hint-file-paths")?.addEventListener("change", ev => {
+  hintFilePathsEnabled = ev.target.checked;
+  renderGroupsTab();
+  autoSave();
+});
+
 function sanitizeTopModel() {
   for (const k of Object.keys(model)) {
     if (!k.startsWith("@")) delete model[k];
@@ -535,21 +721,30 @@ function sanitizeTopModel() {
 }
 
 const debouncedUpdateJson = debounce(() => {
-  cm.setValue(JSON.stringify(generateContentJson(), null, 2));
   syncPatchesField();
-  document.getElementById("meta-patches").value = (model["@patches"] || []).join(",");
-  updateModPreview();
+  if (isJsonTabActive()) {
+    const text = JSON.stringify(generateContentJson(), null, 2);
+    try { cm.operation(() => { cm.setValue(text); }); }
+    catch (e) { cm.setValue(text); }
+  }
   autoSave();
-}, 500);
+}, 700);
 
-function repaint() { loadMeta(model); populateFileModdataScopeSelect(); renderGroups_side(); debouncedUpdateJson(); }
+function repaint() {
+  loadMeta(model);
+  populateFileModdataScopeSelect();
+  populateCsvApplyScopeSelect();
+  renderGroups_side();
+  debouncedUpdateJson();
+  debouncedPreview();
+}
 
 function updateObjectScopeSelect() {
   const sel = document.getElementById("object-scope");
   if (!sel) return;
   const prev = objectScope;
   sel.innerHTML = "";
-  const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "Корень (root.json)"; sel.appendChild(o0);
+  const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "root"; sel.appendChild(o0);
   Object.keys(model["@features"] || {}).forEach(fid => {
     const o = document.createElement("option"); o.value = fid; o.textContent = fid; sel.appendChild(o);
   });
@@ -559,23 +754,63 @@ function updateObjectScopeSelect() {
   sel.onchange = () => { objectScope = sel.value; activeGroupKey = null; renderGroupsTab(); autoSave(); };
 }
 
+function populateCsvApplyScopeSelect() {
+  const sel = document.getElementById("csv-apply-scope");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const o0 = document.createElement("option");
+  o0.value = "";
+  o0.textContent = "root";
+  sel.appendChild(o0);
+  Object.keys(model["@features"] || {}).forEach(fid => {
+    const o = document.createElement("option");
+    o.value = fid;
+    o.textContent = fid;
+    sel.appendChild(o);
+  });
+  if (prev && [...sel.options].some(x => x.value === prev)) sel.value = prev;
+  else sel.value = objectScope || "";
+}
+
+function getBucketForCsvApply() {
+  const v = document.getElementById("csv-apply-scope")?.value ?? "";
+  if (!v) return rootPatchData;
+  ensureFeatureData(v);
+  return featureFileData[v];
+}
+
 function populateFeatureJsonSelect() {
   const sel = document.getElementById("feature-json-select");
   if (!sel) return;
   const prev = selectedFeatureJsonId;
   sel.innerHTML = "";
+  const oRoot = document.createElement("option");
+  oRoot.value = "";
+  oRoot.textContent = "root";
+  sel.appendChild(oRoot);
   const ids = Object.keys(model["@features"] || {});
-  if (!ids.length) { sel.innerHTML = "<option value=\"\">— нет фич —</option>"; selectedFeatureJsonId = ""; return; }
-  ids.forEach(fid => { const o = document.createElement("option"); o.value = fid; o.textContent = fid; sel.appendChild(o); });
-  if (ids.includes(prev)) sel.value = prev;
-  else sel.value = ids[0];
+  ids.forEach(fid => {
+    const o = document.createElement("option");
+    o.value = fid;
+    o.textContent = fid;
+    sel.appendChild(o);
+  });
+  const valid = ["", ...ids];
+  if (valid.includes(prev)) sel.value = prev;
+  else sel.value = "";
   selectedFeatureJsonId = sel.value;
   sel.onchange = () => { selectedFeatureJsonId = sel.value; syncFeatureJsonEditor(); };
 }
 
 function syncFeatureJsonEditor() {
-  ensureFeatureData(selectedFeatureJsonId);
-  const body = featureFileData[selectedFeatureJsonId] || {};
+  let body;
+  if (selectedFeatureJsonId) {
+    ensureFeatureData(selectedFeatureJsonId);
+    body = featureFileData[selectedFeatureJsonId] || {};
+  } else {
+    body = rootPatchData;
+  }
   cmFeatureJson.setValue(JSON.stringify(body, null, 2));
   try { cmFeatureJson.refresh(); } catch (e) {}
 }
@@ -586,10 +821,12 @@ document.getElementById("format-feature-json").addEventListener("click", () => {
 });
 document.getElementById("apply-feature-json").addEventListener("click", () => {
   try {
-    if (!selectedFeatureJsonId) { toast("Выберите фичу", "error"); return; }
-    featureFileData[selectedFeatureJsonId] = JSON.parse(cmFeatureJson.getValue());
+    const parsed = JSON.parse(cmFeatureJson.getValue());
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("ожидается объект JSON");
+    if (selectedFeatureJsonId) featureFileData[selectedFeatureJsonId] = parsed;
+    else rootPatchData = parsed;
     debouncedUpdateJson();
-    toast("JSON фичи применён", "success");
+    toast(selectedFeatureJsonId ? "JSON фичи применён" : "root применён", "success");
   } catch (e) { toast("Ошибка: " + e.message, "error"); }
 });
 
@@ -604,7 +841,7 @@ document.getElementById("add-feature-btn").addEventListener("click", () => {
   ensureFeatureData(id);
   document.getElementById("new-feature-id").value = "";
   document.getElementById("new-feature-priority").value = "0";
-  renderFeatures(); populateFeatureJsonSelect(); updateObjectScopeSelect(); populateFileModdataScopeSelect(); debouncedUpdateJson();
+  renderFeatures(); populateFeatureJsonSelect(); updateObjectScopeSelect(); populateCsvApplyScopeSelect(); populateFileModdataScopeSelect(); debouncedUpdateJson();
 });
 
 document.getElementById("add-group-btn").addEventListener("click", () => {
@@ -618,7 +855,7 @@ document.getElementById("add-group-btn").addEventListener("click", () => {
 });
 
 function countFilesForFeature(fid) {
-  const prefix = `json/moddata/files/${fid}/`;
+  const prefix = `${MODS_FILES_PREFIX}/${fid}/`;
   return files.filter(x => x.zipPath && x.zipPath.startsWith(prefix)).length;
 }
 
@@ -672,7 +909,7 @@ function renderFeatures() {
           ${others.length ? conflictRows : "<p class=\"text-muted-2 small mb-0\">Нет других фич</p>"}
         </div>
         <div class="col-12">
-          <label class="form-label small text-muted-2">Файлы фичи → json/moddata/files/${key}/</label>
+          <label class="form-label small text-muted-2">Файлы → <code>${MODS_FILES_PREFIX}/${key}/</code></label>
           <div class="d-flex gap-2 align-items-center flex-wrap">
             <label class="btn btn-sm btn-outline-light mb-0">📁 Добавить<input type="file" class="d-none" multiple data-feat-files="${key}"></label>
             <small class="text-muted-2" id="f-files-info-${key}">${countFilesForFeature(key)} файл(ов)</small>
@@ -699,17 +936,19 @@ function renderFeatures() {
       showConfirm(`Удалить возможность "${key}"?`, () => {
         delete model["@features"][key];
         delete featureFileData[key];
-        renderFeatures(); populateFeatureJsonSelect(); updateObjectScopeSelect(); populateFileModdataScopeSelect(); debouncedUpdateJson();
+        renderFeatures(); populateFeatureJsonSelect(); updateObjectScopeSelect(); populateCsvApplyScopeSelect(); populateFileModdataScopeSelect(); debouncedUpdateJson();
       });
     });
     div.querySelector(`[data-feat-files="${key}"]`).addEventListener("change", async ev => {
       for (const file of Array.from(ev.target.files)) {
-        const zipPath = `json/moddata/files/${key}/${file.name}`;
+        const zipPath = zipPathModsFiles(key, file.name);
         files.push({ file, folder: "json", zipPath });
         await dbPut(STORE_NAME, { name: file.name, file, type: "modFile", folder: "json", zipPath });
       }
       document.getElementById(`f-files-info-${key}`).textContent = countFilesForFeature(key) + " файл(ов)";
-      renderFiles(); debouncedUpdateJson(); ev.target.value = "";
+      renderFiles();
+      if (document.getElementById("objects-pane")?.classList.contains("active")) renderGroupsTab();
+      debouncedUpdateJson(); ev.target.value = "";
     });
   });
 }
@@ -876,13 +1115,12 @@ function renderActiveGroupVirtual(group, bucket) {
     grid.appendChild(sp);
   }
   paint();
-  const onScroll = () => {
+  const detach = attachPassiveRafScroll(wrap, () => {
     const objNames = getNames();
     start = Math.min(Math.max(0, Math.floor(wrap.scrollTop / ROW_H)), Math.max(0, objNames.length - VISIBLE));
     paint();
-  };
-  wrap.addEventListener("scroll", onScroll);
-  objectsVirtualScrollCleanup = () => wrap.removeEventListener("scroll", onScroll);
+  });
+  objectsVirtualScrollCleanup = detach;
 }
 
 function paintObjectCard(grid, group, bucket, objects, objName) {
@@ -890,29 +1128,45 @@ function paintObjectCard(grid, group, bucket, objects, objName) {
   card.className = "object-card";
   const params = objects[objName];
   const examples = OBJECT_EXAMPLES_BY_GROUP[group] || ["*"];
-  let selectHtml = examples[0] === "*"
-    ? `<input type="text" class="form-control form-control-dark form-control-sm obj-name-input" value="${objName.replace(/"/g, "&quot;")}">`
-    : `<select class="form-select form-select-dark form-select-sm obj-name-input">${examples.map(e => `<option value="${e}" ${e === objName ? "selected" : ""}>${e}</option>`).join("")}</select>`;
+  const nameEsc = objName.replace(/"/g, "&quot;");
+  const nameBlock = examples[0] === "*"
+    ? `<input type="text" class="form-control form-control-dark form-control-sm obj-name-input" value="${nameEsc}">`
+    : `<div class="d-flex gap-1 align-items-center"><input type="text" readonly class="form-control form-control-dark form-control-sm obj-name-display" value="${nameEsc}"><button type="button" class="btn btn-sm btn-outline-light flex-shrink-0 obj-name-pick" title="Выбрать">▾</button></div>`;
   card.innerHTML = `
     <div class="mb-2">
-      <label class="form-label small text-muted-2">Имя объекта</label>
-      ${selectHtml}
+      <label class="form-label small text-muted-2">Объект</label>
+      ${nameBlock}
     </div>
     <div class="d-flex gap-2 mb-3 flex-wrap">
-      <button type="button" class="btn btn-sm btn-primary flex-grow-1 add-param-btn">➕ Параметр</button>
-      <button type="button" class="btn btn-sm btn-outline-danger flex-grow-1 del-obj-btn">🗑️ Удалить</button>
+      <button type="button" class="btn btn-sm btn-primary flex-grow-1 add-param-btn">Параметр</button>
+      <button type="button" class="btn btn-sm btn-outline-danger flex-grow-1 del-obj-btn">Удалить</button>
     </div>
     <div class="params-container d-flex flex-column gap-2"></div>`;
   grid.appendChild(card);
   const nameInput = card.querySelector(".obj-name-input");
-  nameInput.addEventListener("change", e => {
-    const newName = e.target.value;
-    if (newName !== objName && !bucket[group][newName]) {
+  const nameDisp = card.querySelector(".obj-name-display");
+  const namePick = card.querySelector(".obj-name-pick");
+  if (nameInput) {
+    nameInput.addEventListener("change", e => {
+      const newName = e.target.value.trim();
+      if (!newName || newName === objName) { nameInput.value = objName; return; }
+      if (bucket[group][newName]) { toast("Имя занято", "error"); nameInput.value = objName; return; }
       bucket[group][newName] = bucket[group][objName];
       delete bucket[group][objName];
       renderGroupsTab(); debouncedUpdateJson();
-    }
-  });
+    });
+  }
+  if (nameDisp && namePick) {
+    namePick.addEventListener("click", () => {
+      showPickModal("Объект", examples, objName, newName => {
+        if (!newName || newName === objName) return;
+        if (bucket[group][newName]) { toast("Имя занято", "error"); return; }
+        bucket[group][newName] = bucket[group][objName];
+        delete bucket[group][objName];
+        renderGroupsTab(); debouncedUpdateJson();
+      });
+    });
+  }
   card.querySelector(".del-obj-btn").addEventListener("click", () => {
     showConfirm(`Удалить объект "${objName}"?`, () => {
       delete bucket[group][objName];
@@ -922,8 +1176,8 @@ function paintObjectCard(grid, group, bucket, objects, objName) {
   });
   card.querySelector(".add-param-btn").addEventListener("click", () => {
     const avail = PARAMS_BY_GROUP[group] || [];
-    if (!avail.length) { toast("Нет параметров для этой группы", "error"); return; }
-    showParamModal(avail, param => {
+    if (!avail.length) { toast("Нет параметров", "error"); return; }
+    showPickModal("Параметр", avail, avail[0], param => {
       if (bucket[group][objName][param] !== undefined) { toast("Параметр уже добавлен", "error"); return; }
       const t = TYPE_BY_PARAM_BY_GROUP[group]?.[param] || "str";
       bucket[group][objName][param] = t === "bool" ? false : t === "int" ? 0 : "";
@@ -938,10 +1192,29 @@ function paintObjectCard(grid, group, bucket, objects, objName) {
     let inputHtml = "";
     if (pType === "bool") inputHtml = `<select class="form-select form-select-dark form-select-sm param-input"><option value="true" ${params[pName] ? "selected" : ""}>true</option><option value="false" ${!params[pName] ? "selected" : ""}>false</option></select>`;
     else if (pType === "int") inputHtml = `<input type="number" class="form-control form-control-dark form-control-sm param-input" value="${params[pName] || 0}">`;
-    else inputHtml = `<input type="text" class="form-control form-control-dark form-control-sm param-input" value="${String(params[pName] ?? "").replace(/"/g, "&quot;")}">`;
+    else inputHtml = `<input type="text" class="form-control form-control-dark form-control-sm param-input" value="${String(params[pName] ?? "").replace(/"/g, "&quot;")}" autocomplete="off">`;
     pill.innerHTML = `<div class="d-flex align-items-center justify-content-between"><span class="param-name">${pName}</span><button type="button" class="remove-value-btn-param" style="position:static;margin-left:auto">×</button></div>${inputHtml}`;
     pc.appendChild(pill);
-    pill.querySelector(".param-input").addEventListener("change", e => {
+    const inp = pill.querySelector(".param-input");
+    if (pType === "str" && hintFilePathsEnabled) {
+      const feat = objectScope || "root";
+      const prefix = `${MODS_FILES_PREFIX}/${feat}/`;
+      const hits = files.filter(x => x.zipPath?.startsWith(prefix)).map(x => "/" + x.zipPath);
+      const basePath = "/" + prefix;
+      const opts = [...new Set([basePath, ...hits])];
+      if (opts.length) {
+        const dl = document.createElement("datalist");
+        dl.id = "pdl-" + Math.random().toString(36).slice(2);
+        opts.forEach(v => {
+          const o = document.createElement("option");
+          o.value = v;
+          dl.appendChild(o);
+        });
+        pill.appendChild(dl);
+        inp.setAttribute("list", dl.id);
+      }
+    }
+    inp.addEventListener("change", e => {
       const v = e.target.value;
       bucket[group][objName][pName] = pType === "bool" ? v === "true" : pType === "int" ? parseInt(v, 10) || 0 : v;
       debouncedUpdateJson();
@@ -962,10 +1235,17 @@ function addObjectToGroup(group, bucket) {
   debouncedUpdateJson();
 }
 
+document.getElementById("add-object-group-pick").addEventListener("click", () => {
+  if (!GROUP_KEYS.length) { toast("Нужен objectTable", "error"); return; }
+  const inp = document.getElementById("add-object-group");
+  const cur = inp.value.trim();
+  showPickModal("Таблица", GROUP_KEYS, cur && GROUP_KEYS.includes(cur) ? cur : GROUP_KEYS[0], v => { inp.value = v; });
+});
+
 document.getElementById("add-object-btn").addEventListener("click", () => {
   const group = document.getElementById("add-object-group").value.trim();
   if (!group) { toast("Выберите таблицу", "error"); return; }
-  if (!GROUP_KEYS.includes(group)) { toast("Неизвестная таблица: " + group, "error"); return; }
+  if (!GROUP_KEYS.includes(group)) { toast("Неизвестная таблица", "error"); return; }
   const bucket = getObjectBucket();
   if (!bucket[group]) bucket[group] = {};
   addObjectToGroup(group, bucket);
@@ -973,54 +1253,52 @@ document.getElementById("add-object-btn").addEventListener("click", () => {
   renderGroupsTab();
 });
 
-function createSearchableDropdown(inp, opts, items, init = "") {
-  inp.value = init;
-  let filtered = items;
-  const render = () => {
-    opts.innerHTML = "";
-    if (!filtered.length) { opts.innerHTML = "<div class=\"option-item text-muted-2\">Нет результатов</div>"; return; }
-    filtered.forEach(item => {
-      const d = document.createElement("div"); d.className = "option-item"; d.textContent = item;
-      d.addEventListener("click", () => { inp.value = item; opts.style.display = "none"; });
-      opts.appendChild(d);
-    });
-  };
-  inp.addEventListener("focus", () => { opts.style.display = "block"; render(); });
-  inp.addEventListener("input", () => { filtered = items.filter(x => x.toLowerCase().includes(inp.value.toLowerCase())); render(); });
-  document.addEventListener("click", e => { if (!inp.contains(e.target) && !opts.contains(e.target)) opts.style.display = "none"; });
-}
-
-function showParamModal(params, onSelect) {
+function showPickModal(title, items, initial, onOk) {
+  if (!items?.length) { toast("Нет вариантов", "error"); return; }
   const id = "pm-" + Math.random().toString(36).slice(2);
+  const init = initial && items.includes(initial) ? initial : items[0];
   document.body.insertAdjacentHTML("beforeend", `
     <div class="modal fade" id="${id}" tabindex="-1"><div class="modal-dialog modal-dialog-centered">
     <div class="modal-content soft"><div class="modal-header border-0">
-    <h5 class="modal-title">Выбрать параметр</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    <h5 class="modal-title">${title}</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
     </div><div class="modal-body">
-    <input type="text" class="form-control form-control-dark mb-2" id="${id}-search" placeholder="Поиск...">
-    <div style="max-height:200px;overflow-y:auto" id="${id}-list"></div>
-    <input type="hidden" id="${id}-val" value="${params[0]}">
+    <input type="text" class="form-control form-control-dark mb-2" id="${id}-search" placeholder="Поиск…" autocomplete="off">
+    <div style="max-height:240px;overflow-y:auto" id="${id}-list"></div>
+    <input type="hidden" id="${id}-val" value="">
     </div><div class="modal-footer border-0">
     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-    <button type="button" class="btn btn-primary" id="${id}-ok">Добавить</button>
+    <button type="button" class="btn btn-primary" id="${id}-ok">Ок</button>
     </div></div></div></div>`);
   const mel = document.getElementById(id);
   const list = document.getElementById(id + "-list");
-  params.forEach(p => {
-    const div = document.createElement("div");
-    div.className = "option-item";
-    div.style.cssText = "padding:8px 12px;cursor:pointer;border-radius:8px";
-    div.textContent = p;
-    div.addEventListener("click", () => { document.getElementById(id + "-val").value = p; });
-    list.appendChild(div);
-  });
+  const valInput = document.getElementById(id + "-val");
+  valInput.value = init;
+  function paintList(filter) {
+    const q = (filter || "").toLowerCase();
+    list.innerHTML = "";
+    const filtered = items.filter(it => it.toLowerCase().includes(q));
+    if (!filtered.length) {
+      list.innerHTML = "<div class=\"text-muted-2 small p-2\">Нет результатов</div>";
+      return;
+    }
+    filtered.forEach(p => {
+      const div = document.createElement("div");
+      div.className = "option-item modal-pick-option";
+      div.textContent = p;
+      if (p === valInput.value) div.classList.add("selected");
+      div.addEventListener("click", () => {
+        valInput.value = p;
+        list.querySelectorAll(".modal-pick-option").forEach(el => el.classList.remove("selected"));
+        div.classList.add("selected");
+      });
+      list.appendChild(div);
+    });
+  }
+  paintList("");
+  document.getElementById(id + "-search").addEventListener("input", e => paintList(e.target.value));
   const modal = new bootstrap.Modal(mel);
   modal.show();
-  document.getElementById(id + "-search").addEventListener("input", e => {
-    const q = e.target.value.toLowerCase();
-    list.querySelectorAll(".option-item").forEach(el => { el.style.display = el.textContent.toLowerCase().includes(q) ? "block" : "none"; });
-  });
-  document.getElementById(id + "-ok").addEventListener("click", () => { onSelect(document.getElementById(id + "-val").value); modal.hide(); });
+  document.getElementById(id + "-ok").addEventListener("click", () => { onOk(valInput.value); modal.hide(); });
   mel.addEventListener("hidden.bs.modal", () => mel.remove());
 }
 
@@ -1028,7 +1306,9 @@ function parseCSV(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (!lines.length) return { headers: [], rows: [] };
   const headers = parseCsvLine(lines[0]);
-  const rows = lines.slice(1).map(l => parseCsvLine(l));
+  const skipTypeRow = lines.length > 1;
+  const dataStart = skipTypeRow ? 2 : 1;
+  const rows = lines.slice(dataStart).map(l => parseCsvLine(l));
   return { headers, rows };
 }
 function parseCsvLine(line) {
@@ -1045,24 +1325,39 @@ function parseCsvLine(line) {
 
 function populateCsvSelect() {
   const sel = document.getElementById("csv-table-select");
+  if (!sel) return;
   const prev = sel.value;
-  const names = Object.keys(csvData);
-  sel.innerHTML = "<option value=\"\">— выбрать таблицу —</option>";
-  names.forEach(n => { const o = document.createElement("option"); o.value = n; o.textContent = n + ".csv"; sel.appendChild(o); });
+  const fromSchema = GROUP_KEYS.length ? [...GROUP_KEYS].sort() : [];
+  const fromCache = Object.keys(csvData).filter(k => !fromSchema.includes(k)).sort();
+  const names = fromSchema.length ? [...fromSchema, ...fromCache] : fromCache;
+  sel.innerHTML = "<option value=\"\">—</option>";
+  names.forEach(n => {
+    const o = document.createElement("option");
+    o.value = n;
+    o.textContent = csvData[n] ? `${n} ·` : n;
+    sel.appendChild(o);
+  });
   if (prev && names.includes(prev)) sel.value = prev;
 }
 
 document.getElementById("load-csv-btn").addEventListener("click", async () => {
   const name = document.getElementById("csv-table-select").value;
   if (!name) { toast("Выберите таблицу", "error"); return; }
-  if (csvData[name]) { currentCsvName = name; renderCsvTableVirtual(csvData[name]); return; }
-  const tryUrls = [`csvs/csv_logic/${name}.csv`, `csvs/${name}.csv`];
+  if (csvData[name]) { currentCsvName = name; ensureCsvBaseline(name); renderCsvTableVirtual(csvData[name]); return; }
+  const tryUrls = [
+    `${REMOTE_CSV_BASE}csv_logic/${name}.csv`,
+    `${REMOTE_CSV_BASE}csv_client/${name}.csv`,
+    `${REMOTE_CSV_BASE}${name}.csv`,
+    `csvs/csv_logic/${name}.csv`,
+    `csvs/${name}.csv`
+  ];
   for (const url of tryUrls) {
     try {
-      const resp = await fetch(url, { cache: "no-store" });
+      const resp = await fetch(url, { cache: "default", mode: "cors" });
       if (resp.ok) {
         const text = await resp.text();
         csvData[name] = parseCSV(text);
+        setCsvBaseline(name);
         await saveCsvToDb(name, text);
         currentCsvName = name;
         renderCsvTableVirtual(csvData[name]);
@@ -1079,6 +1374,7 @@ document.getElementById("csv-upload-input").addEventListener("change", async e =
   const name = f.name.replace(/\.csv$/i, "");
   const text = await f.text();
   csvData[name] = parseCSV(text);
+  setCsvBaseline(name);
   await saveCsvToDb(name, text);
   populateCsvSelect();
   document.getElementById("csv-table-select").value = name;
@@ -1089,6 +1385,7 @@ document.getElementById("csv-upload-input").addEventListener("change", async e =
 });
 
 function renderCsvTableVirtual(data) {
+  if (currentCsvName) ensureCsvBaseline(currentCsvName);
   if (csvVirtualScrollCleanup) { csvVirtualScrollCleanup(); csvVirtualScrollCleanup = null; }
   const table = document.getElementById("csv-table");
   const wrap = document.getElementById("csv-table-scroll");
@@ -1126,32 +1423,67 @@ function renderCsvTableVirtual(data) {
     if (hint) hint.textContent = `Строки ${start + 1}–${Math.min(start + vis, rows.length)} из ${rows.length} (прокрутка для подгрузки)`;
   }
   paint();
-  const onScroll = () => {
+  const detach = attachPassiveRafScroll(wrap, () => {
     start = Math.min(Math.max(0, Math.floor(wrap.scrollTop / ROW_H)), Math.max(0, rows.length - vis));
     paint();
-  };
-  wrap.addEventListener("scroll", onScroll);
-  csvVirtualScrollCleanup = () => wrap.removeEventListener("scroll", onScroll);
+  });
+  csvVirtualScrollCleanup = detach;
   document.getElementById("csv-editor-area").classList.remove("d-none");
   document.getElementById("csv-empty-state").classList.add("d-none");
 }
 
 document.getElementById("apply-csv-btn").addEventListener("click", () => {
-  if (!currentCsvName || !csvData[currentCsvName]) { toast("Нет загруженной таблицы", "error"); return; }
-  const { headers, rows } = csvData[currentCsvName];
+  if (!currentCsvName || !csvData[currentCsvName]) { toast("Нет таблицы", "error"); return; }
+  const table = currentCsvName;
+  const data = csvData[table];
+  const { headers, rows } = data;
   if (!headers.length) { toast("Таблица пустая", "error"); return; }
-  const patch = {};
-  rows.forEach(row => {
-    const objName = row[0]; if (!objName) return;
-    patch[objName] = {};
-    headers.forEach((h, i) => { if (i === 0) return; if (row[i] !== undefined && row[i] !== "") patch[objName][h] = row[i]; });
-    if (!Object.keys(patch[objName]).length) delete patch[objName];
-  });
-  const bucket = getObjectBucket();
-  bucket[currentCsvName] = patch;
+  ensureCsvBaseline(table);
+  const base = csvBaseline[table];
+  const bucket = getBucketForCsvApply();
+  if (!bucket[table]) bucket[table] = {};
+
+  function rowById(srcRows) {
+    const m = new Map();
+    (srcRows || []).forEach(r => {
+      const id = String(r[0] ?? "").trim();
+      if (id) m.set(id, r);
+    });
+    return m;
+  }
+  const curMap = rowById(rows);
+  const baseMap = rowById(base.rows);
+  const allIds = new Set([...curMap.keys(), ...baseMap.keys()]);
+
+  for (const id of allIds) {
+    const cur = curMap.get(id);
+    const br = baseMap.get(id);
+    if (!cur && br) {
+      delete bucket[table][id];
+      continue;
+    }
+    if (!cur) continue;
+    if (!bucket[table][id]) bucket[table][id] = {};
+    for (let i = 1; i < headers.length; i++) {
+      const h = headers[i];
+      if (!h) continue;
+      const cv = String(cur[i] ?? "").trim();
+      const bv = String(br?.[i] ?? "").trim();
+      if (cv !== bv) {
+        if (!cv) delete bucket[table][id][h];
+        else bucket[table][id][h] = cv;
+      } else if (bucket[table][id][h] !== undefined) {
+        delete bucket[table][id][h];
+      }
+    }
+    if (!Object.keys(bucket[table][id]).length) delete bucket[table][id];
+  }
+  if (!Object.keys(bucket[table]).length) delete bucket[table];
+
+  const target = document.getElementById("csv-apply-scope")?.selectedOptions?.[0]?.textContent || "root";
   debouncedUpdateJson();
-  toast("CSV применён к " + (objectScope || "root"), "success");
-  if (activeGroupKey === currentCsvName) renderGroupsTab();
+  toast(`CSV → ${target} (изменения)`, "success");
+  if (activeGroupKey === table) renderGroupsTab();
 });
 
 document.getElementById("format-json").addEventListener("click", () => {
@@ -1167,12 +1499,14 @@ document.getElementById("apply-json").addEventListener("click", () => {
     model = { "@title": {}, "@description": {}, "@author": "", "@version": "1.0.0", "@features": {}, "@feature_groups": {}, "@root": "", "@patches": [], "@categories": [] };
     migrateLegacyModelIntoPatches(parsed);
     sanitizeTopModel();
+    autoRootPatches = !parsed["@root"] && !(Array.isArray(parsed["@patches"]) && parsed["@patches"].length > 0);
+    syncUiTogglesFromState();
     for (const fid of Object.keys(model["@features"] || {})) {
       const fe = model["@features"][fid];
       for (const x of Object.keys(fe || {})) if (x.startsWith("_")) delete fe[x];
       ensureFeatureData(fid);
     }
-    loadMeta(model); renderFiles(); updateObjectScopeSelect(); populateFeatureJsonSelect(); populateFileModdataScopeSelect();
+    loadMeta(model); renderFiles(); updateObjectScopeSelect(); populateFeatureJsonSelect(); populateCsvApplyScopeSelect(); populateFileModdataScopeSelect();
     renderGroupsTab();
     syncFeatureJsonEditor();
     document.getElementById("code-error").classList.add("d-none");
@@ -1199,10 +1533,10 @@ document.getElementById("export-btn").addEventListener("click", async () => {
     const b = rootPatchData[t];
     return b && typeof b === "object" && Object.keys(b).length > 0;
   });
-  if (rootHas) zip.file(PATH_ROOT_JSON, JSON.stringify(rootPatchData, null, 2));
+  if (rootHas) zip.file(patchToZipPath(patchPathRootJson()), JSON.stringify(rootPatchData, null, 2));
   for (const fid of Object.keys(model["@features"] || {})) {
     const fd = featureFileData[fid];
-    if (fd && typeof fd === "object" && Object.keys(fd).length > 0) zip.file(pathFeatureJson(fid), JSON.stringify(fd, null, 2));
+    if (fd && typeof fd === "object" && Object.keys(fd).length > 0) zip.file(patchToZipPath(patchPathFeatureJson(fid)), JSON.stringify(fd, null, 2));
   }
   files.forEach(item => {
     const path = item.zipPath || (item.subfolder ? `${item.folder}/${item.subfolder}/${item.file.name}` : `${item.folder}/${item.file.name}`);
@@ -1233,6 +1567,8 @@ document.getElementById("import-zip").addEventListener("change", async e => {
       else if (parsed[k] && typeof parsed[k] === "object") rootPatchData[k] = JSON.parse(JSON.stringify(parsed[k]));
     }
     sanitizeTopModel();
+    autoRootPatches = false;
+    syncUiTogglesFromState();
     for (const fid of Object.keys(model["@features"] || {})) {
       const fe = model["@features"][fid];
       for (const x of Object.keys(fe || {})) if (x.startsWith("_")) delete fe[x];
@@ -1246,11 +1582,12 @@ document.getElementById("import-zip").addEventListener("change", async e => {
     };
     const patches = model["@patches"] || [];
     for (const p of patches) {
-      const base = norm(p).split("/").pop().replace(/\.json$/i, "");
+      const np = norm(p);
       const data = await loadPatch(p);
       if (!data) continue;
-      if (base === "root" || norm(p).endsWith("root.json")) mergePatchObjectIntoBucket(rootPatchData, data);
-      else if (model["@features"] && model["@features"][base]) featureFileData[base] = data;
+      const rid = patchJsonRouteId(np);
+      if (rid === "root") mergePatchObjectIntoBucket(rootPatchData, data);
+      else if (model["@features"] && model["@features"][rid]) featureFileData[rid] = data;
       else mergePatchObjectIntoBucket(rootPatchData, data);
     }
     const extraJson = [];
@@ -1258,14 +1595,14 @@ document.getElementById("import-zip").addEventListener("change", async e => {
       if (entry.dir || !path.toLowerCase().endsWith(".json")) return;
       const n = norm(path);
       if (n === "content.json") return;
-      if (n.startsWith("json/moddata/json/")) extraJson.push({ n, entry });
+      if (isPatchJsonZipPath(n)) extraJson.push({ n, entry });
     });
     for (const { n, entry } of extraJson) {
-      const base = n.split("/").pop().replace(/\.json$/i, "");
       let data;
       try { data = JSON.parse(await entry.async("string")); } catch (e) { continue; }
-      if (base === "root") mergePatchObjectIntoBucket(rootPatchData, data);
-      else if (model["@features"] && model["@features"][base]) featureFileData[base] = data;
+      const rid = patchJsonRouteId(n);
+      if (rid === "root") mergePatchObjectIntoBucket(rootPatchData, data);
+      else if (model["@features"] && model["@features"][rid]) featureFileData[rid] = data;
     }
     const iconFile = zip.file("icon.png");
     if (iconFile) {
@@ -1279,7 +1616,13 @@ document.getElementById("import-zip").addEventListener("change", async e => {
     zip.forEach((path, entry) => {
       if (entry.dir || path === "content.json" || path === "icon.png") return;
       const n = norm(path);
-      if (n.startsWith("json/moddata/json/") && n.toLowerCase().endsWith(".json")) return;
+      if (isPatchJsonZipPath(n)) return;
+      if (n.startsWith("json/moddata/files/") || n.startsWith(`${MODS_FILES_PREFIX}/`)) {
+        const z = n.startsWith("json/moddata/files/") ? n.replace(/^json\/moddata\/files\//, `${MODS_FILES_PREFIX}/`) : n;
+        const fn = z.split("/").pop();
+        ps.push(entry.async("blob").then(blob => { files.push({ file: new File([blob], fn), folder: "json", zipPath: z }); }));
+        return;
+      }
       if (n.startsWith("json/moddata/")) {
         const parts = path.split("/");
         const fn = parts[parts.length - 1];
@@ -1298,7 +1641,7 @@ document.getElementById("import-zip").addEventListener("change", async e => {
     await dbClear(STORE_NAME);
     if (modIconFile) await dbPut(STORE_NAME, { name: "icon.png", file: modIconFile, type: "modIcon", folder: null });
     for (const f of files) await dbPut(STORE_NAME, { name: f.file.name, file: f.file, type: "modFile", folder: f.folder, zipPath: f.zipPath || null });
-    loadMeta(model); renderFiles(); updateObjectScopeSelect(); populateFeatureJsonSelect(); populateFileModdataScopeSelect(); renderGroupsTab(); debouncedUpdateJson();
+    loadMeta(model); renderFiles(); updateObjectScopeSelect(); populateFeatureJsonSelect(); populateCsvApplyScopeSelect(); populateFileModdataScopeSelect(); renderGroupsTab(); debouncedUpdateJson();
     toast("Мод импортирован", "success");
   } catch (err) { toast("Ошибка импорта: " + err.message, "error"); }
   finally { e.target.value = ""; }
