@@ -1,1139 +1,1332 @@
-let schema = {};
-let GROUP_KEYS = [];
-let PARAMS_BY_GROUP = {};
-let OBJECT_EXAMPLES_BY_GROUP = {};
+// ============================================================
+// GLOBALS
+// ============================================================
+let schema = {}, GROUP_KEYS = [], PARAMS_BY_GROUP = {}, OBJECT_EXAMPLES_BY_GROUP = {}, TYPE_BY_PARAM_BY_GROUP = {};
+let csvData = {};
+let currentCsvName = null;
+let csvVirtualScrollCleanup = null;
+let objectsVirtualScrollCleanup = null;
+
 let model = {
-    "@title": {},
-    "@description": {},
-    "@author": "",
-    "@version": "",
+  "@title": {}, "@description": {}, "@author": "", "@version": "1.0.0",
+  "@features": {}, "@feature_groups": {}, "@root": "", "@patches": [], "@categories": []
 };
-let files = [];
-let modIconFile = null;
-let currentLanguage = "en";
-const KNOWN_LANGUAGES = ["ru", "en", "cn", "es", "pt", "tr", "fr"];
+let rootPatchData = {};
+let featureFileData = {};
+let files = [], modIconFile = null, currentLanguage = "en";
+let selectedFeatureJsonId = "";
+let objectScope = "";
+let activeGroupKey = null;
 
-const KNOWN_FOLDERS = ["movie", "font", "json", "music", "sc", "sc3d", "sfx", "shader"];
+const KNOWN_LANGUAGES = ["en", "ru", "zh", "es", "pt", "tr", "fr", "de", "ar"];
+const KNOWN_FOLDERS = ["movie","font","json","music","sc","sc3d","sfx","shader"];
+const DB_NAME = "mod-gen-db-v2", DB_VERSION = 4;
+const STORE_NAME = "files", CSV_STORE = "csvtables", SCHEMA_STORE = "objectTableBlob", STATE_STORE = "modState";
+const PATH_ROOT_JSON = "json/moddata/json/root.json";
+const pathFeatureJson = id => `json/moddata/json/${id}.json`;
+const FILES_SCOPE_OFF = "__off__";
+const RANDOM_ACCENTS = ["#2196f3","#4caf50","#f44336","#fbc02d"];
 
-const metaTitle = document.getElementById("meta-title");
-const metaDesc = document.getElementById("meta-description");
-const metaAuthor = document.getElementById("meta-author");
-const metaVersion = document.getElementById("meta-version");
-const languageSelect = document.getElementById("language-select");
+function pickRandomAccent() { return RANDOM_ACCENTS[Math.floor(Math.random() * RANDOM_ACCENTS.length)]; }
 
-const iconInput = document.getElementById("mod-icon");
-const iconPreview = document.getElementById("icon-preview");
-const removeIconButton = document.getElementById("remove-icon-btn");
+function toast(msg, type = "info") {
+  const tc = document.getElementById("toast-container");
+  const el = document.createElement("div");
+  el.className = `toast-item ${type}`;
+  el.textContent = msg;
+  tc.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
 
-const folderSelect = document.getElementById("folder-select");
-const fileInput = document.getElementById("file-input");
-const filesList = document.getElementById("files-list");
+function applyAccentColor(c) {
+  document.documentElement.style.setProperty("--accent", c);
+  document.documentElement.style.setProperty("--accent-dark", adjColor(c, -20));
+  document.documentElement.style.setProperty("--accent-light", adjColor(c, 20));
+  document.documentElement.style.setProperty("--gradient-primary", `linear-gradient(135deg,${c} 0%,${adjColor(c, 30)} 100%)`);
+  document.documentElement.style.setProperty("--shadow-glow", `0 0 20px rgba(${hexRgb(c)},.3)`);
+  document.documentElement.style.setProperty("--shadow-glow-hover", `0 0 40px rgba(${hexRgb(c)},.5)`);
+}
+function adjColor(c, a) {
+  const col = c.slice(1), n = parseInt(col, 16);
+  let r = (n >> 16) + a, g = (n >> 8 & 255) + a, b = (n & 255) + a;
+  r = Math.min(255, Math.max(0, r)); g = Math.min(255, Math.max(0, g)); b = Math.min(255, Math.max(0, b));
+  return "#" + (r << 16 | g << 8 | b).toString(16).padStart(6, "0");
+}
+function hexRgb(h) {
+  const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h);
+  return r ? `${parseInt(r[1], 16)},${parseInt(r[2], 16)},${parseInt(r[3], 16)}` : "100,181,246";
+}
 
-const addObjectGroupInput = document.getElementById("add-object-group");
-const addObjectGroupOptions = document.getElementById("add-object-group-options");
-const addObjBtn = document.getElementById("add-object-btn");
-const groupsRoot = document.getElementById("groups-root");
-
-const jsonPreview = document.getElementById("json-preview");
-const metaPreview = document.getElementById("meta-preview");
-const previewTitle = document.getElementById("preview-title");
-const previewDescription = document.getElementById("preview-description");
-const previewAuthor = document.getElementById("preview-author");
-
-const exportBtn = document.getElementById("export-btn");
-const importBtn = document.getElementById("import-btn");
-const importZipInput = document.getElementById("import-zip");
-
-const applyBtn = document.getElementById("apply-json");
-const formatBtn = document.getElementById("format-json");
-const codeError = document.getElementById("code-error");
-
-const mainTabs = new bootstrap.Tab(document.getElementById('visual-tab'));
-const codeTab = document.getElementById('code-tab');
-
-const resetDataBtn = document.getElementById("reset-data-btn");
-
-const DB_NAME = 'mod-generator-db';
-const DB_VERSION = 1;
-const STORE_NAME = 'files';
-
-function createModal(title, message, isConfirm, onConfirm) {
-    const modalId = `custom-modal-${Math.random().toString(36).substr(2, 9)}`;
-    const modalHtml = `
-        <div class="modal fade" id="${modalId}" tabindex="-1" aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered">
-                <div class="modal-content soft">
-                    <div class="modal-header border-0">
-                        <h5 class="modal-title text-white">${title}</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body text-muted-2">
-                        ${message}
-                    </div>
-                    <div class="modal-footer border-0">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
-                        ${isConfirm ? `<button type="button" class="btn btn-primary" id="confirm-btn">Подтвердить</button>` : ''}
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    const modalElement = document.getElementById(modalId);
-    const modal = new bootstrap.Modal(modalElement);
-    modal.show();
-
-    modalElement.addEventListener('hidden.bs.modal', () => {
-        modalElement.remove();
+function openDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onerror = e => rej(e.target.error);
+    req.onsuccess = e => res(e.target.result);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
+      if (!db.objectStoreNames.contains(CSV_STORE)) db.createObjectStore(CSV_STORE, { keyPath: "name" });
+      if (!db.objectStoreNames.contains(SCHEMA_STORE)) db.createObjectStore(SCHEMA_STORE, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(STATE_STORE)) db.createObjectStore(STATE_STORE, { keyPath: "id" });
+    };
+  });
+}
+async function dbPut(store, val) {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(store, "readwrite");
+    tx.objectStore(store).put(val);
+    await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
+  } catch (e) { console.error(e); }
+}
+async function dbGetAll(store) {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(store, "readonly");
+    return new Promise((r, j) => {
+      const req = tx.objectStore(store).getAll();
+      req.onsuccess = () => r(req.result);
+      req.onerror = () => j(req.error);
     });
+  } catch (e) { return []; }
+}
+async function dbGetById(store, id) {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(store, "readonly");
+    return new Promise((r, j) => {
+      const q = tx.objectStore(store).get(id);
+      q.onsuccess = () => r(q.result);
+      q.onerror = () => j(q.error);
+    });
+  } catch (e) { return null; }
+}
+async function dbClear(store) {
+  const db = await openDB();
+  const tx = db.transaction(store, "readwrite");
+  tx.objectStore(store).clear();
+  await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = () => j(tx.error); });
+}
 
-    if (isConfirm) {
-        const confirmBtn = modalElement.querySelector('#confirm-btn');
-        confirmBtn.addEventListener('click', () => {
-            onConfirm();
-            modal.hide();
-        });
+async function saveObjectTableToDb(data) {
+  await dbPut(SCHEMA_STORE, { id: "objectTable", data });
+}
+async function loadObjectTableFromDb() {
+  const row = await dbGetById(SCHEMA_STORE, "objectTable");
+  return row?.data || null;
+}
+
+async function saveModStateToDb() {
+  await dbPut(STATE_STORE, { id: "tables", rootPatchData, featureFileData });
+}
+async function loadModStateFromDb() {
+  const row = await dbGetById(STATE_STORE, "tables");
+  if (!row) return;
+  if (row.rootPatchData && typeof row.rootPatchData === "object") rootPatchData = row.rootPatchData;
+  if (row.featureFileData && typeof row.featureFileData === "object") featureFileData = row.featureFileData;
+}
+
+async function saveCsvToDb(name, text) { await dbPut(CSV_STORE, { name, text }); }
+async function loadAllCsvFromDb() {
+  const rows = await dbGetAll(CSV_STORE);
+  rows.forEach(r => { csvData[r.name] = parseCSV(r.text); populateCsvSelect(); });
+}
+
+const debounce = (fn, ms = 400) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+const autoSave = debounce(async () => {
+  try {
+    localStorage.setItem("mod-gen-v2", JSON.stringify({ model, currentLanguage, objectScope }));
+  } catch (e) { toast("Не удалось сохранить в localStorage: " + e.message, "error"); }
+  try { await saveModStateToDb(); } catch (e) {}
+}, 800);
+
+function migrateLegacyModelIntoPatches(src) {
+  if (!src || typeof src !== "object") return;
+  for (const k of Object.keys(src)) {
+    if (k.startsWith("@")) model[k] = JSON.parse(JSON.stringify(src[k]));
+    else if (src[k] && typeof src[k] === "object" && !Array.isArray(src[k])) rootPatchData[k] = JSON.parse(JSON.stringify(src[k]));
+  }
+}
+
+async function loadState() {
+  applyAccentColor(pickRandomAccent());
+  await loadModStateFromDb();
+  const raw = localStorage.getItem("mod-gen-v2");
+  if (raw) {
+    try {
+      const d = JSON.parse(raw);
+      if (d.model) migrateLegacyModelIntoPatches(d.model);
+      currentLanguage = d.currentLanguage || "en";
+      objectScope = d.objectScope || "";
+    } catch (e) {}
+  }
+  const stored = await dbGetAll(STORE_NAME);
+  modIconFile = stored.find(f => f.type === "modIcon")?.file || null;
+  files = stored.filter(f => f.type === "modFile").map(f => ({
+    file: f.file,
+    folder: f.folder,
+    zipPath: f.zipPath || null,
+    moddataSubpath: f.moddataSubpath || null
+  }));
+  if (modIconFile) showIconPreview(URL.createObjectURL(modIconFile));
+  await loadAllCsvFromDb();
+}
+
+function getIntl(obj, lang) {
+  if (typeof obj === "string") return obj;
+  const u = lang.toUpperCase();
+  return obj?.[u] || obj?.["EN"] || "";
+}
+function setIntl(obj, lang, val) {
+  if (typeof obj === "object" && obj !== null) {
+    const u = lang.toUpperCase();
+    if (val) obj[u] = val; else delete obj[u];
+  }
+}
+
+function stripNonAtKeys(obj) {
+  const o = {};
+  for (const k of Object.keys(obj || {})) if (k.startsWith("@")) o[k] = obj[k];
+  return o;
+}
+
+function stripFeatureToAtKeys(feat) {
+  const o = {};
+  for (const k of Object.keys(feat || {})) if (k.startsWith("@")) o[k] = feat[k];
+  return o;
+}
+
+function ensureFeatureData(fid) {
+  if (!featureFileData[fid]) featureFileData[fid] = {};
+}
+
+function computeAutoPatches() {
+  const p = [];
+  const rootHas = Object.keys(rootPatchData).some(t => {
+    const b = rootPatchData[t];
+    return b && typeof b === "object" && Object.keys(b).length > 0;
+  });
+  if (rootHas) p.push(PATH_ROOT_JSON);
+  for (const fid of Object.keys(model["@features"] || {})) {
+    const fd = featureFileData[fid];
+    if (fd && typeof fd === "object" && Object.keys(fd).length > 0) p.push(pathFeatureJson(fid));
+  }
+  return [...new Set(p)];
+}
+
+function syncPatchesField() {
+  model["@patches"] = computeAutoPatches();
+  const el = document.getElementById("meta-patches");
+  if (el) el.value = (model["@patches"] || []).join(",");
+}
+
+function generateContentJson() {
+  syncPatchesField();
+  const j = {};
+  if (model["@title"] && Object.keys(model["@title"]).length) j["@title"] = model["@title"];
+  if (model["@description"] && Object.keys(model["@description"]).length) j["@description"] = model["@description"];
+  if (model["@author"]) j["@author"] = model["@author"];
+  if (model["@version"]) j["@version"] = model["@version"];
+  if (model["@gv"] !== undefined && model["@gv"] !== null && model["@gv"] !== "") j["@gv"] = model["@gv"];
+  if (model["@categories"]?.length) j["@categories"] = model["@categories"];
+  if (model["@features"] && Object.keys(model["@features"]).length) {
+    j["@features"] = {};
+    for (const fid of Object.keys(model["@features"])) {
+      j["@features"][fid] = stripFeatureToAtKeys(model["@features"][fid]);
     }
+  }
+  if (model["@feature_groups"] && Object.keys(model["@feature_groups"]).length) j["@feature_groups"] = JSON.parse(JSON.stringify(model["@feature_groups"]));
+  if (model["@root"]) j["@root"] = model["@root"];
+  if (model["@patches"]?.length) j["@patches"] = model["@patches"];
+  return j;
 }
 
-function showAlert(message, title = "Уведомление") {
-    createModal(title, message, false);
+function getObjectBucket() {
+  if (!objectScope) return rootPatchData;
+  ensureFeatureData(objectScope);
+  return featureFileData[objectScope];
 }
 
-function showConfirm(message, title = "Подтверждение", onConfirm) {
-    createModal(title, message, true, onConfirm);
+function tableKeysInBucket(bucket) {
+  return Object.keys(bucket || {}).filter(k => GROUP_KEYS.includes(k));
 }
 
+const cm = CodeMirror(document.getElementById("editor"), { value: "{}", mode: { name: "javascript", json: true }, theme: "material-darker", lineNumbers: true, tabSize: 2, indentUnit: 2, lineWrapping: true });
+let cmFeatureJson = CodeMirror(document.getElementById("single-feature-editor"), { value: "{}", mode: { name: "javascript", json: true }, theme: "material-darker", lineNumbers: true, tabSize: 2, indentUnit: 2, lineWrapping: true });
 
-let cm = CodeMirror(document.getElementById("editor"), {
-    value: "{\n  \n}",
-    mode: {
-        name: "javascript",
-        json: true
-    },
-    theme: "material-darker",
-    lineNumbers: true,
-    tabSize: 2,
-    indentUnit: 2,
-    lineWrapping: true,
+document.getElementById("code-tab").addEventListener("shown.bs.tab", () => cm.refresh());
+document.getElementById("features-tab").addEventListener("shown.bs.tab", () => {
+  cmFeatureJson.refresh();
+  renderFeatures();
+  renderFeatureGroups();
+  populateFeatureJsonSelect();
+  populateFileModdataScopeSelect();
+  syncFeatureJsonEditor();
 });
+document.getElementById("objects-tab").addEventListener("shown.bs.tab", () => { updateObjectScopeSelect(); renderGroupsTab(); });
+document.getElementById("tables-tab").addEventListener("shown.bs.tab", () => populateCsvSelect());
 
-const debounce = (fn, ms = 400) => {
-    let t;
-    return (...args) => {
-        clearTimeout(t);
-        t = setTimeout(() => fn(...args), ms);
-    };
-};
-
-function getValueForLang(obj, lang) {
-    if (typeof obj === "string") {
-        return obj;
-    }
-    const upperLang = lang.toUpperCase();
-    const lowerLang = lang.toLowerCase();
-    return obj?.[upperLang] || obj?.[lowerLang] || "";
+function populateLangSelect() {
+  const sel = document.getElementById("language-select");
+  sel.innerHTML = "";
+  KNOWN_LANGUAGES.forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l.toUpperCase(); sel.appendChild(o); });
+  sel.value = currentLanguage;
 }
+document.getElementById("language-select").addEventListener("change", e => { currentLanguage = e.target.value; loadMeta(model); updateModPreview(); autoSave(); });
 
-function setValueForLang(obj, lang, value) {
-    if (typeof obj === "object" && obj !== null) {
-        const upperLang = lang.toUpperCase();
-        if (value) {
-            obj[upperLang] = value;
-        } else {
-            delete obj[upperLang];
-        }
-    }
-}
-
-function getObjectKeyByValue(obj, value) {
-    for (const key in obj) {
-        if (Object.prototype.hasOwnProperty.call(obj, key)) {
-            if (obj[key] === value) {
-                return key;
-            }
-        }
-    }
-    return null;
-}
-
-// =========================================================================
-// IndexedDB and localStorage Functions
-// =========================================================================
-
-function openDatabase() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onerror = (event) => reject(event.target.error);
-        request.onsuccess = (event) => resolve(event.target.result);
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
-            }
-        };
+function renderCategories() {
+  const div = document.getElementById("categories-display");
+  div.innerHTML = "";
+  (model["@categories"] || []).forEach(cat => {
+    const p = document.createElement("span");
+    p.className = "cat-pill";
+    p.innerHTML = `${cat} <button type="button" class="cat-pill-remove" data-cat="${cat}">×</button>`;
+    p.querySelector(".cat-pill-remove").addEventListener("click", () => {
+      model["@categories"] = (model["@categories"] || []).filter(c => c !== cat);
+      renderCategories(); debouncedUpdateJson();
     });
+    div.appendChild(p);
+  });
 }
-
-async function saveFileToDb(fileObject, type, folder) {
-    try {
-        const db = await openDatabase();
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-        const fileData = {
-            name: fileObject.name,
-            file: fileObject,
-            type: type, // 'modIcon' or 'modFile'
-            folder: folder || null,
-        };
-        store.put(fileData);
-        await tx.complete;
-    } catch (e) {
-        console.error("Failed to save file to IndexedDB:", e);
-    }
-}
-
-async function getFilesFromDb() {
-    try {
-        const db = await openDatabase();
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const store = tx.objectStore(STORE_NAME);
-        const allFiles = await store.getAll();
-        await tx.complete;
-        return allFiles;
-    } catch (e) {
-        console.error("Failed to get files from IndexedDB:", e);
-        return [];
-    }
-}
-
-async function clearIndexedDb() {
-    try {
-        const db = await openDatabase();
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-        store.clear();
-        await tx.complete;
-    } catch (e) {
-        console.error("Failed to clear IndexedDB:", e);
-    }
-}
-
-function saveModelToLocalStorage() {
-    const data = {
-        model,
-        currentLanguage,
-    };
-    localStorage.setItem('modGeneratorData', JSON.stringify(data));
-    console.log("Auto-saved model to localStorage.");
-}
-
-async function loadModelFromLocalStorage() {
-    // Load model data from localStorage
-    const storedData = localStorage.getItem('modGeneratorData');
-    if (storedData) {
-        try {
-            const data = JSON.parse(storedData);
-            model = data.model;
-            currentLanguage = data.currentLanguage;
-            showAlert("Данные успешно восстановлены из последней сессии.");
-        } catch (e) {
-            console.error("Failed to load data from localStorage:", e);
-            showAlert("Не удалось загрузить данные из последней сессии.");
-        }
-    }
-
-    // Load files from IndexedDB
-    const storedFiles = await getFilesFromDb();
-    if (storedFiles.length > 0) {
-        modIconFile = storedFiles.find(f => f.type === 'modIcon')?.file || null;
-        files = storedFiles.filter(f => f.type === 'modFile').map(f => ({ file: f.file, folder: f.folder }));
-
-        if (modIconFile) {
-            iconPreview.src = URL.createObjectURL(modIconFile);
-            iconPreview.classList.remove("d-none");
-            removeIconButton.classList.remove("d-none");
-        }
-        renderFiles();
-    }
-}
-
-const autoSave = debounce(() => {
-    saveModelToLocalStorage();
-}, 5000); // Auto-save model every 5 seconds
-
-function resetDataAndReload() {
-    showConfirm("Вы уверены, что хотите сбросить все данные? Это действие необратимо.", "Сброс данных", async () => {
-        localStorage.clear();
-        await clearIndexedDb();
-        window.location.reload();
-    });
-}
-// =========================================================================
-// End of IndexedDB and localStorage functions
-// =========================================================================
-
-const updateCodeMirror = debounce(() => {
-    const text = cm.getValue();
-    try {
-        JSON.parse(text);
-        codeError.classList.add("d-none");
-    } catch (e) {
-        codeError.textContent = "Ошибка JSON: " + e.message;
-        codeError.classList.remove("d-none");
-    }
-}, 500);
-
-cm.on("change", updateCodeMirror);
-
-codeTab.addEventListener('shown.bs.tab', () => {
-    cm.refresh();
+document.getElementById("categories-select").addEventListener("change", e => {
+  const v = e.target.value; if (!v) return;
+  if (!(model["@categories"] || []).includes(v)) model["@categories"] = [...(model["@categories"] || []), v];
+  e.target.value = ""; renderCategories(); debouncedUpdateJson();
 });
 
 function loadMeta(meta) {
-    metaTitle.value = getValueForLang(meta["@title"], currentLanguage);
-    metaDesc.value = getValueForLang(meta["@description"], currentLanguage);
-    metaAuthor.value = meta["@author"] || "";
-    metaVersion.value = meta["@version"] || "";
-    updateMetaPreview();
+  document.getElementById("meta-title").value = getIntl(meta["@title"] || {}, currentLanguage);
+  document.getElementById("meta-description").value = getIntl(meta["@description"] || {}, currentLanguage);
+  document.getElementById("meta-author").value = meta["@author"] || "";
+  document.getElementById("meta-version").value = meta["@version"] || "1.0.0";
+  const gvEl = document.getElementById("meta-gv");
+  if (meta["@gv"] === undefined || meta["@gv"] === null || meta["@gv"] === "") gvEl.value = "";
+  else gvEl.value = String(meta["@gv"]);
+  document.getElementById("meta-root").value = meta["@root"] || "";
+  syncPatchesField();
+  document.getElementById("meta-patches").value = (model["@patches"] || []).join(",");
+  renderCategories();
+  updateModPreview();
+}
+document.getElementById("meta-title").addEventListener("input", e => { if (!model["@title"]) model["@title"] = {}; setIntl(model["@title"], currentLanguage, e.target.value); updateModPreview(); debouncedUpdateJson(); });
+document.getElementById("meta-description").addEventListener("input", e => { if (!model["@description"]) model["@description"] = {}; setIntl(model["@description"], currentLanguage, e.target.value); updateModPreview(); debouncedUpdateJson(); });
+document.getElementById("meta-author").addEventListener("input", e => { model["@author"] = e.target.value; updateModPreview(); debouncedUpdateJson(); });
+document.getElementById("meta-version").addEventListener("input", e => { model["@version"] = e.target.value; debouncedUpdateJson(); });
+document.getElementById("meta-gv").addEventListener("input", e => {
+  const v = e.target.value.trim();
+  if (v === "") delete model["@gv"];
+  else { const n = parseInt(v, 10); if (!Number.isNaN(n)) model["@gv"] = n; }
+  debouncedUpdateJson();
+});
+document.getElementById("meta-root").addEventListener("input", e => { model["@root"] = e.target.value; debouncedUpdateJson(); });
+
+function updateModPreview() {
+  const title = getIntl(model["@title"] || {}, currentLanguage) || "Название мода";
+  const author = model["@author"] || "Не указан";
+  document.getElementById("preview-mod-title").textContent = title;
+  document.getElementById("preview-mod-author").textContent = `Автор: ${author}`;
+  const descEl = document.getElementById("preview-mod-description");
+  const rawDesc = getIntl(model["@description"] || {}, currentLanguage) || "Описание мода";
+  descEl.classList.add("preview-html");
+  descEl.innerHTML = rawDesc;
 }
 
-function generateJson() {
-    const json = {};
-
-    if (model["@title"] && Object.keys(model["@title"]).length > 0) {
-        json["@title"] = model["@title"];
-    }
-    if (model["@description"] && Object.keys(model["@description"]).length > 0) {
-        json["@description"] = model["@description"];
-    }
-    if (model["@author"]) {
-        json["@author"] = model["@author"];
-    }
-    if (model["@version"]) {
-        json["@version"] = model["@version"];
-    }
-
-    for (const group in model) {
-        if (group.startsWith("@")) continue;
-        if (Object.keys(model[group]).length > 0) {
-            json[group] = model[group];
-        }
-    }
-    return json;
+function showIconPreview(src) {
+  document.getElementById("icon-preview").src = src;
+  document.getElementById("icon-preview").classList.remove("d-none");
+  document.getElementById("icon-placeholder").classList.add("d-none");
+  document.getElementById("preview-icon").src = src;
+  document.getElementById("preview-icon").classList.remove("d-none");
+  document.getElementById("preview-icon-placeholder").classList.add("d-none");
+  document.getElementById("remove-icon-btn").classList.remove("d-none");
+  generatePreviewGradient(src);
+}
+function generatePreviewGradient(src) {
+  const img = new Image();
+  img.crossOrigin = "Anonymous";
+  img.onload = () => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 10;
+    const ctx = c.getContext("2d");
+    ctx.drawImage(img, 0, 0, 10, 10);
+    const d = ctx.getImageData(0, 0, 10, 10).data;
+    let r = 0, g = 0, b = 0, cnt = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; cnt++; }
+    r = Math.round(r / cnt); g = Math.round(g / cnt); b = Math.round(b / cnt);
+    const mid = `rgba(${Math.round(r * .6)},${Math.round(g * .6)},${Math.round(b * .6)},0.25)`;
+    const dark = `rgba(${r},${g},${b},0.15)`;
+    document.getElementById("mod-preview").style.background = `linear-gradient(135deg,${mid} 0%,#0a0d14 60%,${dark} 100%)`;
+  };
+  img.onerror = () => {};
+  img.src = src;
 }
 
-(async function loadSchema() {
-    try {
-        const res = await fetch("https://raw.githubusercontent.com/darkmean-dev/nullsmods-schema/main/schema.json");
-        const data = await res.json();
-        const props = data?.properties || {};
-        schema = props;
-
-        GROUP_KEYS = Object.keys(props).filter(k => !k.startsWith("@"));
-
-        GROUP_KEYS.forEach(g => {
-            const params = Object.keys(props[g]?.additionalProperties?.properties || {});
-            PARAMS_BY_GROUP[g] = params;
-            const examples = props[g]?.propertyNames?.examples || [];
-            OBJECT_EXAMPLES_BY_GROUP[g] = ["*", ...examples];
-        });
-
-        populateFolderSelect();
-        createSearchableDropdown(addObjectGroupInput, addObjectGroupOptions, GROUP_KEYS, addObjectGroupInput.value);
-        populateLanguageSelect();
-        
-        await loadModelFromLocalStorage();
-        renderAll();
-
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/service-worker.js')
-                    .then(registration => {
-                        console.log('Service Worker registered with scope:', registration.scope);
-                    })
-                    .catch(error => {
-                        console.log('Service Worker registration failed:', error);
-                    });
-            });
-        }
-
-    } catch (error) {
-        console.error("Failed to load schema:", error);
-        showAlert("Не удалось загрузить схему модов. Некоторые функции могут не работать.");
-    }
-})();
-
-function populateLanguageSelect() {
-    languageSelect.innerHTML = "";
-    KNOWN_LANGUAGES.forEach(lang => {
-        const opt = document.createElement("option");
-        opt.value = lang;
-        opt.textContent = lang.toUpperCase();
-        languageSelect.appendChild(opt);
-    });
-    languageSelect.value = currentLanguage;
-}
-
-languageSelect.addEventListener("change", (e) => {
-    currentLanguage = e.target.value;
-    repaint();
-    autoSave();
+document.getElementById("mod-icon").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  modIconFile = f;
+  showIconPreview(URL.createObjectURL(f));
+  await dbPut(STORE_NAME, { name: f.name, file: f, type: "modIcon", folder: null });
+  autoSave();
 });
-
-
-const debouncedUpdateJson = debounce(() => {
-    const outputModel = JSON.parse(JSON.stringify(model));
-
-    if (outputModel["@title"] && typeof outputModel["@title"] === 'object') {
-        const titleText = getValueForLang(outputModel["@title"], currentLanguage);
-        outputModel["@title"] = titleText || Object.values(outputModel["@title"])[0] || "";
-    }
-
-    if (outputModel["@description"] && typeof outputModel["@description"] === 'object') {
-        const descText = getValueForLang(outputModel["@description"], currentLanguage);
-        outputModel["@description"] = descText || Object.values(outputModel["@description"])[0] || "";
-    }
-
-    jsonPreview.textContent = JSON.stringify(outputModel, null, 2);
-    cm.setValue(JSON.stringify(model, null, 2));
-    autoSave();
-}, 500);
-
-metaTitle.addEventListener("input", (e) => {
-    if (!model["@title"]) model["@title"] = {};
-    setValueForLang(model["@title"], currentLanguage, e.target.value);
-    updateMetaPreview();
-    debouncedUpdateJson();
-});
-
-metaDesc.addEventListener("input", (e) => {
-    if (!model["@description"]) model["@description"] = {};
-    setValueForLang(model["@description"], currentLanguage, e.target.value);
-    updateMetaPreview();
-    debouncedUpdateJson();
-});
-
-metaAuthor.addEventListener("input", (e) => {
-    model["@author"] = e.target.value;
-    updateMetaPreview();
-    debouncedUpdateJson();
-});
-
-metaVersion.addEventListener("input", (e) => {
-    model["@version"] = e.target.value;
-    updateMetaPreview();
-    debouncedUpdateJson();
-});
-
-
-function cleanupMeta() {
-    // This function is no longer needed on every input,
-    // as cleanup is now handled on export.
-}
-
-function updateMetaPreview() {
-    const titleText = getValueForLang(model["@title"], currentLanguage);
-    const descText = getValueForLang(model["@description"], currentLanguage);
-    const authorText = model["@author"];
-
-    if (titleText || descText || authorText) {
-        metaPreview.classList.remove("d-none");
-        previewTitle.innerHTML = titleText || "Название мода";
-        previewDescription.innerHTML = (descText || "Описание мода").replace(/\n/g, '<br>');
-        previewAuthor.innerHTML = authorText ? `Автор: ${authorText}` : "Автор: Не указан";
-    } else {
-        metaPreview.classList.add("d-none");
-    }
-}
-
-iconInput.addEventListener("change", e => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const img = new Image();
-    img.src = URL.createObjectURL(f);
-    img.onload = () => {
-        if (img.width > 640 || img.height > 640) {
-            showAlert("Иконка должна быть ≤640×640");
-            iconInput.value = "";
-            iconPreview.classList.add("d-none");
-            iconPreview.removeAttribute("src");
-            modIconFile = null;
-        } else {
-            modIconFile = f;
-            iconPreview.src = img.src;
-            iconPreview.classList.remove("d-none");
-            removeIconButton.classList.remove("d-none");
-            saveFileToDb(modIconFile, 'modIcon', null);
-        }
-    };
-});
-
-removeIconButton.addEventListener("click", () => {
-    iconInput.value = "";
-    iconPreview.classList.add("d-none");
-    iconPreview.removeAttribute("src");
-    modIconFile = null;
-    saveFileToDb(null, 'modIcon', null);
-    autoSave();
+document.getElementById("remove-icon-btn").addEventListener("click", async () => {
+  modIconFile = null;
+  document.getElementById("icon-preview").classList.add("d-none");
+  document.getElementById("icon-placeholder").classList.remove("d-none");
+  document.getElementById("preview-icon").classList.add("d-none");
+  document.getElementById("preview-icon-placeholder").classList.remove("d-none");
+  document.getElementById("remove-icon-btn").classList.add("d-none");
+  document.getElementById("mod-preview").style.background = "";
+  document.getElementById("mod-icon").value = "";
+  const stored = await dbGetAll(STORE_NAME);
+  await dbClear(STORE_NAME);
+  for (const f of stored.filter(x => x.type !== "modIcon")) await dbPut(STORE_NAME, f);
+  autoSave();
 });
 
 function populateFolderSelect() {
-    folderSelect.innerHTML = "";
-    KNOWN_FOLDERS.forEach(f => {
-        const opt = document.createElement("option");
-        opt.value = f;
-        opt.textContent = f;
-        folderSelect.appendChild(opt);
-    });
+  const sel = document.getElementById("folder-select");
+  sel.innerHTML = "";
+  KNOWN_FOLDERS.forEach(f => { const o = document.createElement("option"); o.value = f; o.textContent = f; sel.appendChild(o); });
 }
-function createParamDropdown(groupKey, objectCard) {
-    const params = PARAMS_BY_GROUP[groupKey];
-    if (!params || params.length === 0) return null;
-
-    const dropdownHtml = `
-        <div class="dropdown add-param-dropdown">
-            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                Добавить параметр
-            </button>
-            <ul class="dropdown-menu">
-                ${params.map(param => `<li class="dropdown-item" data-param-key="${param}">${param}</li>`).join('')}
-            </ul>
-        </div>
-    `;
-
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = dropdownHtml.trim();
-    const dropdown = tempDiv.firstChild;
-
-    dropdown.querySelectorAll('.dropdown-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            const paramKey = e.target.getAttribute('data-param-key');
-            addParamToObject(objectCard, groupKey, paramKey);
-        });
-    });
-
-    return dropdown;
+function populateFileModdataScopeSelect() {
+  const sel = document.getElementById("file-moddata-scope");
+  if (!sel) return;
+  const v = sel.value;
+  sel.innerHTML = "";
+  const o0 = document.createElement("option");
+  o0.value = FILES_SCOPE_OFF; o0.textContent = "Обычный путь (папка слева)";
+  sel.appendChild(o0);
+  const o1 = document.createElement("option");
+  o1.value = "root"; o1.textContent = "root (корень объектов)";
+  sel.appendChild(o1);
+  Object.keys(model["@features"] || {}).forEach(fid => {
+    const o = document.createElement("option");
+    o.value = fid; o.textContent = fid;
+    sel.appendChild(o);
+  });
+  if ([...sel.options].some(x => x.value === v)) sel.value = v;
+  else sel.value = "root";
 }
 
-fileInput.addEventListener("change", e => {
-    const folder = folderSelect.value || KNOWN_FOLDERS[0];
-    [...e.target.files].forEach(f => {
-        if (!files.some(item => item.folder === folder && item.file.name === f.name)) {
-            files.push({
-                file: f,
-                folder
-            });
-            saveFileToDb(f, 'modFile', folder);
-        }
-    });
-    e.target.value = "";
-    renderFiles();
-    autoSave();
+function resolveZipPathForFile(folder, f, scopeSel) {
+  if (scopeSel && scopeSel !== FILES_SCOPE_OFF) {
+    return `json/moddata/files/${scopeSel}/${f.name}`;
+  }
+  return `${folder}/${f.name}`;
+}
+
+document.getElementById("file-input").addEventListener("change", async e => {
+  const folder = document.getElementById("folder-select").value;
+  const scopeSel = document.getElementById("file-moddata-scope")?.value || FILES_SCOPE_OFF;
+  for (const f of Array.from(e.target.files)) {
+    const zipPath = resolveZipPathForFile(folder, f, scopeSel);
+    const entry = { file: f, folder, zipPath };
+    files.push(entry);
+    await dbPut(STORE_NAME, { name: f.name, file: f, type: "modFile", folder, zipPath });
+  }
+  renderFiles(); autoSave(); e.target.value = "";
 });
 
 function renderFiles() {
-    filesList.innerHTML = "";
-    if (files.length === 0) {
-        const li = document.createElement("li");
-        li.className = "list-group-item text-muted-2";
-        li.textContent = "Пока нет файлов...";
-        filesList.appendChild(li);
-        return;
+  const ul = document.getElementById("files-list"); ul.innerHTML = "";
+  files.forEach((item, idx) => {
+    const li = document.createElement("li");
+    li.className = "list-group-item d-flex justify-content-between align-items-center";
+    const rel = item.zipPath || (item.subfolder ? `${item.folder}/${item.subfolder}/${item.file.name}` : `${item.folder}/${item.file.name}`);
+    li.innerHTML = `<span><strong>${rel}</strong></span><button type="button" class="btn btn-sm btn-outline-danger" data-i="${idx}">🗑️</button>`;
+    ul.appendChild(li);
+  });
+  ul.querySelectorAll("[data-i]").forEach(btn => btn.addEventListener("click", async ev => {
+    const i = parseInt(ev.target.closest("[data-i]").dataset.i, 10);
+    files.splice(i, 1);
+    const stored = await dbGetAll(STORE_NAME); await dbClear(STORE_NAME);
+    if (modIconFile) await dbPut(STORE_NAME, { name: modIconFile.name, file: modIconFile, type: "modIcon", folder: null });
+    for (const f of files) await dbPut(STORE_NAME, { name: f.file.name, file: f.file, type: "modFile", folder: f.folder, zipPath: f.zipPath || null });
+    renderFiles(); autoSave();
+  }));
+}
+
+async function fetchObjectTableFromUrls() {
+  const urls = ["http://127.0.0.1:5500/assets/objectTable.json", "res.json", "./objectTable.json", "./res.json"];
+  for (const u of urls) {
+    try {
+      const resp = await fetch(u, { cache: "no-store" });
+      if (resp.ok) return await resp.json();
+    } catch (e) {}
+  }
+  return null;
+}
+
+async function downloadObjectTable() {
+  const prog = document.getElementById("progress-container");
+  const bar = document.getElementById("progress-bar");
+  prog.classList.remove("d-none"); bar.style.width = "0%"; bar.textContent = "0%";
+  try {
+    const resp = await fetch("objectTable.json", { cache: "no-store" });
+    if (!resp.ok) throw new Error("objectTable.json недоступен");
+    const total = parseInt(resp.headers.get("content-length") || "0", 10);
+    let loaded = 0;
+    const chunks = [];
+    const reader = resp.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      if (total) { const p = Math.round(loaded / total * 100); bar.style.width = p + "%"; bar.textContent = p + "%"; }
     }
-    files.forEach((item, idx) => {
-        const li = document.createElement("li");
-        li.className = "list-group-item d-flex justify-content-between align-items-center";
-        li.textContent = `${item.folder}/${item.file.name}`;
-        const del = document.createElement("button");
-        del.className = "btn btn-sm btn-danger";
-        del.textContent = "Удалить";
-        del.addEventListener("click", () => {
-            const fileId = files.find(f => f.file.name === item.file.name)?.id;
-            if (fileId) {
-                // Here's an example of how to delete a single file. For now, we'll simplify.
-                // A full implementation would need to track file IDs.
-                // Let's just update the entire DB for simplicity in this example.
-            }
-            files.splice(idx, 1);
-            // Re-save all files to DB
-            clearIndexedDb().then(() => {
-                if (modIconFile) saveFileToDb(modIconFile, 'modIcon', null);
-                files.forEach(f => saveFileToDb(f.file, 'modFile', f.folder));
-                renderFiles();
-                autoSave();
-            });
-        });
-        li.appendChild(del);
-        filesList.appendChild(li);
-    });
+    const text = await new Blob(chunks).text();
+    const data = JSON.parse(text);
+    processSchema(data);
+    await saveObjectTableToDb(data);
+    try { localStorage.removeItem("objectTable"); } catch (e) {}
+    bar.style.width = "100%"; bar.textContent = "100%";
+    setTimeout(() => { prog.classList.add("d-none"); toast("objectTable сохранён в IndexedDB", "success"); }, 400);
+    createSearchableDropdown(document.getElementById("add-object-group"), document.getElementById("add-object-group-options"), GROUP_KEYS, "");
+    updateObjectScopeSelect();
+  } catch (err) {
+    prog.classList.add("d-none");
+    toast("Не удалось скачать: " + err.message, "error");
+  }
+}
+function processSchema(data) {
+  schema = data; GROUP_KEYS = Object.keys(data);
+  GROUP_KEYS.forEach(g => {
+    const gd = data[g] || {};
+    PARAMS_BY_GROUP[g] = Object.keys(gd.params || {});
+    OBJECT_EXAMPLES_BY_GROUP[g] = gd.objects || ["*"];
+    TYPE_BY_PARAM_BY_GROUP[g] = gd.params || {};
+  });
+}
+document.getElementById("download-object-table").addEventListener("click", downloadObjectTable);
+
+(async function initSchema() {
+  let data = await loadObjectTableFromDb();
+  if (!data) {
+    try {
+      const ls = localStorage.getItem("objectTable");
+      if (ls) { data = JSON.parse(ls); localStorage.removeItem("objectTable"); await saveObjectTableToDb(data); }
+    } catch (e) {}
+  }
+  if (!data) data = await fetchObjectTableFromUrls();
+  if (data) {
+    processSchema(data);
+    const cached = await loadObjectTableFromDb();
+    if (!cached) await saveObjectTableToDb(data);
+  }
+  populateFolderSelect();
+  populateLangSelect();
+  createSearchableDropdown(document.getElementById("add-object-group"), document.getElementById("add-object-group-options"), GROUP_KEYS, "");
+  await loadState();
+  sanitizeTopModel();
+  populateFileModdataScopeSelect();
+  loadMeta(model);
+  renderFiles();
+  populateFeatureJsonSelect();
+  updateObjectScopeSelect();
+  populateCsvSelect();
+  repaint();
+})();
+
+function sanitizeTopModel() {
+  for (const k of Object.keys(model)) {
+    if (!k.startsWith("@")) delete model[k];
+  }
 }
 
-function createSearchableDropdown(inputElement, optionsContainer, allOptions, selectedValue, onSelectCallback) {
-    optionsContainer.innerHTML = "";
+const debouncedUpdateJson = debounce(() => {
+  cm.setValue(JSON.stringify(generateContentJson(), null, 2));
+  syncPatchesField();
+  document.getElementById("meta-patches").value = (model["@patches"] || []).join(",");
+  updateModPreview();
+  autoSave();
+}, 500);
 
-    allOptions.forEach(option => {
-        const div = document.createElement("div");
-        div.className = "option-item";
-        div.textContent = option;
-        div.onclick = () => {
-            selectOption(inputElement, optionsContainer, option);
-            if (onSelectCallback) onSelectCallback(option);
-        };
-        optionsContainer.appendChild(div);
-    });
+function repaint() { loadMeta(model); populateFileModdataScopeSelect(); renderGroups_side(); debouncedUpdateJson(); }
 
-    inputElement.value = selectedValue || "";
-
-    inputElement.addEventListener("input", () => {
-        filterOptions(inputElement, optionsContainer);
-    });
-
-    inputElement.addEventListener("focus", () => {
-        toggleDropdown(optionsContainer, true);
-        filterOptions(inputElement, optionsContainer);
-    });
+function updateObjectScopeSelect() {
+  const sel = document.getElementById("object-scope");
+  if (!sel) return;
+  const prev = objectScope;
+  sel.innerHTML = "";
+  const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "Корень (root.json)"; sel.appendChild(o0);
+  Object.keys(model["@features"] || {}).forEach(fid => {
+    const o = document.createElement("option"); o.value = fid; o.textContent = fid; sel.appendChild(o);
+  });
+  if ([...sel.options].some(x => x.value === prev)) sel.value = prev;
+  else sel.value = "";
+  objectScope = sel.value;
+  sel.onchange = () => { objectScope = sel.value; activeGroupKey = null; renderGroupsTab(); autoSave(); };
 }
 
-function filterOptions(searchInput, optionsContainer) {
-    const searchInputText = searchInput.value.toLowerCase();
-    const options = Array.from(optionsContainer.children);
-
-    options.forEach(option => {
-        if (option.textContent.toLowerCase().includes(searchInputText)) {
-            option.style.display = "block";
-        } else {
-            option.style.display = "none";
-        }
-    });
-
-    toggleDropdown(optionsContainer, true);
+function populateFeatureJsonSelect() {
+  const sel = document.getElementById("feature-json-select");
+  if (!sel) return;
+  const prev = selectedFeatureJsonId;
+  sel.innerHTML = "";
+  const ids = Object.keys(model["@features"] || {});
+  if (!ids.length) { sel.innerHTML = "<option value=\"\">— нет фич —</option>"; selectedFeatureJsonId = ""; return; }
+  ids.forEach(fid => { const o = document.createElement("option"); o.value = fid; o.textContent = fid; sel.appendChild(o); });
+  if (ids.includes(prev)) sel.value = prev;
+  else sel.value = ids[0];
+  selectedFeatureJsonId = sel.value;
+  sel.onchange = () => { selectedFeatureJsonId = sel.value; syncFeatureJsonEditor(); };
 }
 
-function selectOption(inputElement, optionsContainer, value) {
-    inputElement.value = value;
-    toggleDropdown(optionsContainer, false);
+function syncFeatureJsonEditor() {
+  ensureFeatureData(selectedFeatureJsonId);
+  const body = featureFileData[selectedFeatureJsonId] || {};
+  cmFeatureJson.setValue(JSON.stringify(body, null, 2));
+  try { cmFeatureJson.refresh(); } catch (e) {}
 }
 
-function toggleDropdown(container, show) {
-    container.style.display = show ? "block" : "none";
-}
-
-document.addEventListener("click", (event) => {
-    document.querySelectorAll('.options-container').forEach(container => {
-        const inputElement = container.previousElementSibling;
-        if (inputElement && !inputElement.contains(event.target) && !container.contains(event.target)) {
-            toggleDropdown(container, false);
-        }
-    });
-
-    // Hide any open param-choices lists when clicking outside
-    document.querySelectorAll('.param-choices').forEach(pc => {
-        if (!pc.contains(event.target) && !pc._ownerButton?.contains(event.target)) {
-            pc.style.display = 'none';
-        }
-    });
+document.getElementById("format-feature-json").addEventListener("click", () => {
+  try { cmFeatureJson.setValue(JSON.stringify(JSON.parse(cmFeatureJson.getValue()), null, 2)); toast("Отформатировано", "success"); }
+  catch (e) { toast("Ошибка JSON", "error"); }
 });
-// End of Custom Select / Searchable Dropdown Logic
-
-
-addObjBtn.addEventListener("click", () => {
-    const group = addObjectGroupInput.value;
-    addObject(group);
-    addObjectGroupInput.value = "";
-    toggleDropdown(addObjectGroupOptions, false);
-    autoSave();
-});
-
-function addObject(group, objName = "*") {
-    if (!group) return;
-    if (!model[group]) model[group] = {};
-    
-    if (!GROUP_KEYS.includes(group)) {
-        showAlert(`Группа "${group}" не найдена в схеме.`);
-        return;
-    }
-
-    if (model[group][objName] === undefined) {
-        model[group][objName] = {};
-    }
-
-    if (Object.keys(model[group][objName]).length === 0) {
-        const firstParam = PARAMS_BY_GROUP[group]?.[0];
-        if (firstParam) {
-            const paramSchema = schema[group]?.additionalProperties?.properties?.[firstParam];
-            let defaultValue = "";
-            if (paramSchema?.type === 'boolean') {
-                defaultValue = false;
-            } else if (paramSchema?.default !== undefined) {
-                defaultValue = paramSchema.default;
-            } else if (paramSchema?.type === "array") {
-                defaultValue = [""];
-            }
-            model[group][objName][firstParam] = defaultValue;
-        }
-    }
-    repaint();
-}
-
-function renderGroups() {
-    groupsRoot.innerHTML = "";
-    const hasContent = GROUP_KEYS.some(g => model[g] && Object.keys(model[g]).length > 0);
-
-    if (!hasContent) {
-        const emptyState = document.createElement('div');
-        emptyState.className = 'text-center p-5 text-muted-2';
-        emptyState.innerHTML = `
-            <h5 class="fw-normal">Объектов пока нет</h5>
-            <p class="mb-0">Используйте поле поиска и кнопку "Добавить", чтобы начать.</p>
-        `;
-        groupsRoot.appendChild(emptyState);
-        return;
-    }
-
-    GROUP_KEYS.forEach(group => {
-        const groupObj = model[group] || {};
-        if (Object.keys(groupObj).length === 0) return;
-
-        const gCard = document.createElement("div");
-        gCard.className = "group-card";
-
-        const header = document.createElement("div");
-        header.className = "group-header";
-
-        const title = document.createElement("div");
-        title.className = "group-title";
-        title.textContent = group;
-
-        const addForGroup = document.createElement("button");
-        addForGroup.className = "btn btn-sm btn-outline-light";
-        addForGroup.textContent = "Добавить объект";
-        addForGroup.addEventListener("click", () => {
-            addObject(group);
-            autoSave();
-        });
-
-        header.appendChild(title);
-        header.appendChild(addForGroup);
-
-        const grid = document.createElement("div");
-        grid.className = "objects-grid";
-
-        Object.keys(groupObj).forEach(objectName => {
-            const params = groupObj[objectName] || {};
-            const oCard = document.createElement("div");
-            oCard.className = "object-card";
-
-            const objSelectContainer = document.createElement("div");
-            objSelectContainer.className = "object-head custom-select-container";
-
-            const objSelectInput = document.createElement("input");
-            objSelectInput.type = "text";
-            objSelectInput.className = "form-control form-control-dark custom-select-input object-select";
-            objSelectInput.placeholder = "Поиск объекта...";
-            objSelectInput.value = objectName;
-
-            const objSelectOptions = document.createElement("div");
-            objSelectOptions.className = "options-container";
-
-            createSearchableDropdown(
-                objSelectInput,
-                objSelectOptions,
-                [...new Set([...OBJECT_EXAMPLES_BY_GROUP[group], objectName])],
-                objectName,
-                (newName) => {
-                    if (newName === objectName) return;
-                    model[group][newName] = model[group][objectName] || {};
-                    delete model[group][objectName];
-                    repaint();
-                    autoSave();
-                }
-            );
-
-            objSelectContainer.appendChild(objSelectInput);
-            objSelectContainer.appendChild(objSelectOptions);
-
-            const actionsContainer = document.createElement("div");
-            actionsContainer.className = "object-actions";
-
-            const addParam = document.createElement("button");
-            addParam.className = "btn btn-sm btn-outline-light";
-            addParam.textContent = "Параметр";
-
-            // popup-style scrollable list (like options-container)
-            const paramChoices = document.createElement('div');
-            paramChoices.className = 'param-choices';
-            Object.assign(paramChoices.style, {
-                display: 'none',
-                position: 'absolute',
-                zIndex: 60,
-                right: '0px',
-                top: 'calc(100% + 8px)',
-                minWidth: '220px',
-                maxHeight: '220px',
-                overflowY: 'auto',
-                background: 'var(--card)',
-                border: '1px solid var(--line)',
-                borderRadius: '8px',
-                padding: '6px',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
-            });
-
-            // Mark owner so global click handler can detect outside clicks
-            paramChoices._ownerButton = addParam;
-
-            // Ensure actions container is positioning context for absolute popup
-            actionsContainer.style.position = 'relative';
-
-            const delObj = document.createElement("button");
-            delObj.className = "btn btn-sm btn-danger";
-            delObj.textContent = "Удалить";
-            delObj.addEventListener("click", () => {
-                showConfirm(`Вы уверены, что хотите удалить объект "${objectName}"?`, "Подтверждение", () => {
-                    delete model[group][objectName];
-                    if (Object.keys(model[group]).length === 0) delete model[group];
-                    repaint();
-                    autoSave();
-                });
-            });
-
-            actionsContainer.appendChild(addParam);
-            actionsContainer.appendChild(delObj);
-            actionsContainer.appendChild(paramChoices);
-
-            // When clicking the addParam button - toggle the param choices popup
-            addParam.addEventListener('click', (e) => {
-                e.stopPropagation();
-
-                // compute available params at the time of opening
-                const availableParamsToAdd = PARAMS_BY_GROUP[group].filter(p => !Object.keys(model[group][objectName] || {}).includes(p));
-
-                // clear previous content
-                paramChoices.innerHTML = '';
-
-                if (availableParamsToAdd.length === 0) {
-                    const li = document.createElement('div');
-                    li.className = 'option-item text-muted-2';
-                    li.textContent = 'Нет доступных параметров';
-                    paramChoices.appendChild(li);
-                    paramChoices.style.display = 'block';
-                    return;
-                }
-
-                availableParamsToAdd.forEach(paramName => {
-                    const div = document.createElement('div');
-                    div.className = 'option-item';
-                    div.textContent = paramName;
-                    div.style.padding = '8px 10px';
-                    div.style.cursor = 'pointer';
-                    div.style.borderRadius = '6px';
-                    div.addEventListener('click', (ev) => {
-                        ev.stopPropagation();
-                        const paramSchema = schema[group]?.additionalProperties?.properties?.[paramName];
-                        let defaultValue = "";
-                        if (paramSchema?.type === 'boolean') {
-                            defaultValue = false;
-                        } else if (paramSchema?.default !== undefined) {
-                            defaultValue = paramSchema.default;
-                        } else if (paramSchema?.type === "array") {
-                            defaultValue = [""];
-                        }
-                        if (!model[group]) model[group] = {};
-                        if (!model[group][objectName]) model[group][objectName] = {};
-                        model[group][objectName][paramName] = defaultValue;
-                        paramChoices.style.display = 'none';
-                        repaint();
-                        autoSave();
-                    });
-                    paramChoices.appendChild(div);
-                });
-
-                // toggle visibility
-                paramChoices.style.display = paramChoices.style.display === 'block' ? 'none' : 'block';
-            });
-
-            const pList = document.createElement("div");
-            pList.className = "param-list";
-
-            Object.keys(params).forEach(paramName => {
-                const paramSchema = schema[group]?.additionalProperties?.properties?.[paramName];
-                const isBoolean = paramSchema?.type === 'boolean';
-                const isObject = paramSchema?.type === 'object';
-                const isNumber = paramSchema?.type === 'number';
-
-                const pill = document.createElement("div");
-                pill.className = "param-pill";
-
-                const paramHeader = document.createElement("div");
-                paramHeader.className = "param-header d-flex justify-content-between align-items-center mb-1";
-
-                const nameLabel = document.createElement("span");
-                nameLabel.textContent = paramName;
-                nameLabel.className = "param-name-label";
-
-                const delParamBtn = document.createElement("button");
-                delParamBtn.className = "remove-value-btn-param btn btn-sm btn-danger";
-                delParamBtn.textContent = "×";
-                delParamBtn.addEventListener("click", () => {
-                    delete model[group][objectName][paramName];
-                    repaint();
-                    autoSave();
-                });
-
-                paramHeader.appendChild(nameLabel);
-                paramHeader.appendChild(delParamBtn);
-                pill.appendChild(paramHeader);
-
-                const addValueBtn = document.createElement("button");
-                addValueBtn.className = "add-value-btn btn btn-sm btn-outline-light mb-1";
-                addValueBtn.innerHTML = "+ Добавить значение...";
-                addValueBtn.addEventListener("click", () => {
-                    const currentValue = model[group][objectName][paramName];
-                    if (Array.isArray(currentValue)) currentValue.push("");
-                    else model[group][objectName][paramName] = [currentValue, ""];
-                    repaint();
-                    autoSave();
-                });
-                pill.appendChild(addValueBtn);
-
-                const valueContainer = document.createElement("div");
-                valueContainer.className = `param-value d-flex flex-wrap gap-2`;
-
-                if (Array.isArray(params[paramName])) {
-                    params[paramName].forEach((value, valueIndex) => {
-                        const input = document.createElement("input");
-                        input.type = isNumber ? "number" : "text";
-                        input.value = value;
-                        input.className = "form-control form-control-sm";
-                        input.style.minWidth = "80px";
-
-                        input.addEventListener("input", (e) => {
-                            let newValue = e.target.value;
-                            if (isNumber) newValue = parseFloat(newValue);
-                            model[group][objectName][paramName][valueIndex] = newValue;
-                            debouncedUpdateJson();
-                        });
-
-                        valueContainer.appendChild(input);
-                    });
-                } else if (isBoolean) {
-                    const input = document.createElement("input");
-                    input.type = "checkbox";
-                    input.checked = params[paramName];
-                    input.addEventListener("change", (e) => {
-                        model[group][objectName][paramName] = e.target.checked;
-                        debouncedUpdateJson();
-                    });
-                    valueContainer.appendChild(input);
-                } else if (isObject) {
-                    const obj = params[paramName] || {};
-                    const objKey = Object.keys(obj)[0];
-                    const objValue = obj[objKey];
-
-                    const keyInput = document.createElement("input");
-                    keyInput.type = "text";
-                    keyInput.placeholder = "key";
-                    keyInput.value = objKey || "";
-                    keyInput.addEventListener("input", debounce((e) => {
-                        const newKey = e.target.value;
-                        const oldValue = model[group][objectName][paramName]?.[objKey];
-                        if (newKey) model[group][objectName][paramName] = { [newKey]: oldValue || "" };
-                        else delete model[group][objectName][paramName];
-                        repaint();
-                        autoSave();
-                    }, 500));
-
-                    const valueInput = document.createElement("input");
-                    valueInput.type = "text";
-                    valueInput.placeholder = "value";
-                    valueInput.value = objValue || "";
-                    valueInput.addEventListener("input", (e) => {
-                        if (objKey) model[group][objectName][paramName][objKey] = e.target.value;
-                        debouncedUpdateJson();
-                    });
-
-                    valueContainer.appendChild(keyInput);
-                    valueContainer.appendChild(valueInput);
-                } else {
-                    const input = document.createElement("input");
-                    input.type = isNumber ? "number" : "text";
-                    input.value = params[paramName];
-                    input.addEventListener("input", (e) => {
-                        let value = e.target.value;
-                        if (isNumber) value = parseFloat(value);
-                        model[group][objectName][paramName] = value;
-                        debouncedUpdateJson();
-                    });
-                    valueContainer.appendChild(input);
-                }
-
-                pill.appendChild(valueContainer);
-                pList.appendChild(pill);
-            });
-
-            oCard.appendChild(objSelectContainer);
-            oCard.appendChild(actionsContainer);
-            oCard.appendChild(pList);
-            grid.appendChild(oCard);
-        });
-
-        gCard.appendChild(header);
-        gCard.appendChild(grid);
-        groupsRoot.appendChild(gCard);
-    });
-}
-
-
-
-function repaint() {
-    loadMeta(model);
-    renderGroups();
-    renderFiles();
+document.getElementById("apply-feature-json").addEventListener("click", () => {
+  try {
+    if (!selectedFeatureJsonId) { toast("Выберите фичу", "error"); return; }
+    featureFileData[selectedFeatureJsonId] = JSON.parse(cmFeatureJson.getValue());
     debouncedUpdateJson();
+    toast("JSON фичи применён", "success");
+  } catch (e) { toast("Ошибка: " + e.message, "error"); }
+});
+
+document.getElementById("add-feature-btn").addEventListener("click", () => {
+  const id = document.getElementById("new-feature-id").value.trim();
+  const priority = parseInt(document.getElementById("new-feature-priority").value, 10) || 0;
+  const enabled = document.getElementById("new-feature-enabled").value === "true";
+  if (!id) { toast("Введите ID возможности", "error"); return; }
+  if (!model["@features"]) model["@features"] = {};
+  model["@features"][id] = { "@name": { EN: id }, "@priority": priority };
+  if (!enabled) model["@features"][id]["@enabled"] = false;
+  ensureFeatureData(id);
+  document.getElementById("new-feature-id").value = "";
+  document.getElementById("new-feature-priority").value = "0";
+  renderFeatures(); populateFeatureJsonSelect(); updateObjectScopeSelect(); populateFileModdataScopeSelect(); debouncedUpdateJson();
+});
+
+document.getElementById("add-group-btn").addEventListener("click", () => {
+  const id = document.getElementById("new-group-id").value.trim();
+  const type = document.getElementById("new-group-type").value;
+  if (!id) { toast("Введите ID группы", "error"); return; }
+  if (!model["@feature_groups"]) model["@feature_groups"] = {};
+  model["@feature_groups"][id] = { "@name": { EN: id }, "@type": type, "@features": [] };
+  document.getElementById("new-group-id").value = "";
+  renderFeatureGroups(); debouncedUpdateJson();
+});
+
+function countFilesForFeature(fid) {
+  const prefix = `json/moddata/files/${fid}/`;
+  return files.filter(x => x.zipPath && x.zipPath.startsWith(prefix)).length;
 }
 
-function renderAll() {
-    repaint();
-    renderFiles();
+function renderFeatures() {
+  const list = document.getElementById("features-list");
+  list.innerHTML = "";
+  const features = model["@features"] || {};
+  if (!Object.keys(features).length) { list.innerHTML = "<p class=\"text-muted-2 text-center\">Нет возможностей</p>"; return; }
+  Object.keys(features).forEach(key => {
+    const f = features[key];
+    const others = Object.keys(features).filter(k => k !== key);
+    const conflicts = f["@conflicts"] || [];
+    const conflictRows = others.map(ok => `
+      <div class="conflict-row">
+        <span>${ok}</span>
+        <div class="form-check form-switch m-0">
+          <input class="form-check-input feature-switch" type="checkbox" role="switch" data-feat="${key}" data-other="${ok}" ${conflicts.includes(ok) ? "checked" : ""}>
+        </div>
+      </div>`).join("");
+    const div = document.createElement("div");
+    div.className = "feature-card fade-in-up";
+    div.innerHTML = `
+      <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+        <span class="feature-id">${key}</span>
+        <button type="button" class="btn btn-sm btn-outline-danger" data-del-feat="${key}">🗑️ Удалить</button>
+      </div>
+      <div class="row g-2">
+        <div class="col-12 col-md-6">
+          <label class="form-label small text-muted-2">Название (@name) <span class="text-danger">*</span></label>
+          <div class="intl-lang-tabs" id="f-name-tabs-${key}"></div>
+          <input type="text" class="form-control form-control-dark" id="f-name-${key}" placeholder="Название фичи" value="">
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label small text-muted-2">Описание (@description)</label>
+          <div class="intl-lang-tabs" id="f-desc-tabs-${key}"></div>
+          <input type="text" class="form-control form-control-dark" id="f-desc-${key}" placeholder="Описание" value="">
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label small text-muted-2">Приоритет</label>
+          <input type="number" class="form-control form-control-dark" id="f-pri-${key}" value="${f["@priority"] ?? 0}">
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label small text-muted-2">По умолч.</label>
+          <select class="form-select form-select-dark" id="f-enabled-${key}">
+            <option value="true" ${f["@enabled"] !== false ? "selected" : ""}>Включена</option>
+            <option value="false" ${f["@enabled"] === false ? "selected" : ""}>Выключена</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label small text-muted-2">Конфликты (@conflicts)</label>
+          ${others.length ? conflictRows : "<p class=\"text-muted-2 small mb-0\">Нет других фич</p>"}
+        </div>
+        <div class="col-12">
+          <label class="form-label small text-muted-2">Файлы фичи → json/moddata/files/${key}/</label>
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <label class="btn btn-sm btn-outline-light mb-0">📁 Добавить<input type="file" class="d-none" multiple data-feat-files="${key}"></label>
+            <small class="text-muted-2" id="f-files-info-${key}">${countFilesForFeature(key)} файл(ов)</small>
+          </div>
+        </div>
+      </div>`;
+    list.appendChild(div);
+    document.getElementById(`f-name-${key}`).value = getIntl(f["@name"] || {}, currentLanguage);
+    document.getElementById(`f-desc-${key}`).value = getIntl(f["@description"] || {}, currentLanguage);
+    buildIntlTabs(`f-name-tabs-${key}`, `f-name-${key}`, key, "@name");
+    buildIntlTabs(`f-desc-tabs-${key}`, `f-desc-${key}`, key, "@description", true);
+    document.getElementById(`f-name-${key}`).addEventListener("input", e => { if (!f["@name"]) f["@name"] = {}; setIntl(f["@name"], currentLanguage, e.target.value); debouncedUpdateJson(); });
+    document.getElementById(`f-desc-${key}`).addEventListener("input", e => { if (!f["@description"]) f["@description"] = {}; setIntl(f["@description"], currentLanguage, e.target.value); debouncedUpdateJson(); });
+    document.getElementById(`f-pri-${key}`).addEventListener("input", e => { f["@priority"] = parseInt(e.target.value, 10) || 0; debouncedUpdateJson(); });
+    document.getElementById(`f-enabled-${key}`).addEventListener("change", e => { if (e.target.value === "false") f["@enabled"] = false; else delete f["@enabled"]; debouncedUpdateJson(); });
+    div.querySelectorAll(".feature-switch").forEach(sw => {
+      sw.addEventListener("change", () => {
+        const arr = [...div.querySelectorAll(".feature-switch")].filter(x => x.checked).map(x => x.dataset.other);
+        if (arr.length) f["@conflicts"] = arr; else delete f["@conflicts"];
+        debouncedUpdateJson();
+      });
+    });
+    div.querySelector(`[data-del-feat="${key}"]`).addEventListener("click", () => {
+      showConfirm(`Удалить возможность "${key}"?`, () => {
+        delete model["@features"][key];
+        delete featureFileData[key];
+        renderFeatures(); populateFeatureJsonSelect(); updateObjectScopeSelect(); populateFileModdataScopeSelect(); debouncedUpdateJson();
+      });
+    });
+    div.querySelector(`[data-feat-files="${key}"]`).addEventListener("change", async ev => {
+      for (const file of Array.from(ev.target.files)) {
+        const zipPath = `json/moddata/files/${key}/${file.name}`;
+        files.push({ file, folder: "json", zipPath });
+        await dbPut(STORE_NAME, { name: file.name, file, type: "modFile", folder: "json", zipPath });
+      }
+      document.getElementById(`f-files-info-${key}`).textContent = countFilesForFeature(key) + " файл(ов)";
+      renderFiles(); debouncedUpdateJson(); ev.target.value = "";
+    });
+  });
 }
 
-exportBtn.addEventListener("click", async () => {
-    const zip = new JSZip();
+function buildIntlTabs(tabsId, inputId, featureKey, field) {
+  const tabs = document.getElementById(tabsId);
+  const inp = document.getElementById(inputId);
+  if (!tabs || !inp) return;
+  tabs.innerHTML = "";
+  KNOWN_LANGUAGES.slice(0, 5).forEach(lang => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "intl-lang-tab" + (lang === currentLanguage ? " active" : "");
+    btn.textContent = lang.toUpperCase();
+    btn.addEventListener("click", () => {
+      tabs.querySelectorAll(".intl-lang-tab").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const ff = model["@features"]?.[featureKey];
+      if (ff) inp.value = getIntl(ff[field] || {}, lang);
+      inp.dataset.lang = lang;
+    });
+    tabs.appendChild(btn);
+  });
+  inp.dataset.lang = currentLanguage;
+  inp.addEventListener("input", e => {
+    const lang = e.target.dataset.lang || currentLanguage;
+    const ff = model["@features"]?.[featureKey];
+    if (ff) { if (!ff[field]) ff[field] = {}; setIntl(ff[field], lang, e.target.value); }
+    debouncedUpdateJson();
+  });
+}
 
-    // Add JSON
-    const modJson = generateJson();
-    zip.file("content.json", JSON.stringify(modJson, null, 2));
+function renderFeatureGroups() {
+  const list = document.getElementById("feature-groups-list");
+  list.innerHTML = "";
+  const groups = model["@feature_groups"] || {};
+  if (!Object.keys(groups).length) { list.innerHTML = "<p class=\"text-muted-2 text-center\">Нет групп</p>"; return; }
+  const featureIds = Object.keys(model["@features"] || {});
+  Object.keys(groups).forEach(gid => {
+    const g = groups[gid];
+    const isRadio = g["@type"] === "RADIO_GROUP";
+    const members = g["@features"] || [];
+    const memberRows = featureIds.map(fid => {
+      const inG = members.includes(fid);
+      const isStd = g["@standard"] === fid;
+      return `<div class="fg-member-row">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" data-gid="${gid}" data-fid="${fid}" id="fgm-${gid}-${fid}" ${inG ? "checked" : ""}>
+          <label class="form-check-label" for="fgm-${gid}-${fid}">${fid}</label>
+        </div>
+        ${isRadio ? `<span class="radio-default-badge${isStd ? " active" : ""}" data-set-std="${gid}" data-std-fid="${fid}" title="Стандарт для RADIO_GROUP">стандарт</span>` : ""}
+      </div>`;
+    }).join("");
+    const div = document.createElement("div");
+    div.className = "feature-card";
+    div.innerHTML = `
+      <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <span class="feature-id">${gid}</span>
+        <div class="d-flex gap-2">
+          <select class="form-select form-select-dark form-select-sm" data-fg-type="${gid}">
+            <option value="DEFAULT" ${g["@type"] === "DEFAULT" ? "selected" : ""}>DEFAULT</option>
+            <option value="RADIO_GROUP" ${g["@type"] === "RADIO_GROUP" ? "selected" : ""}>RADIO_GROUP</option>
+          </select>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-del-grp="${gid}">🗑️</button>
+        </div>
+      </div>
+      <label class="form-label small text-muted-2">Название</label>
+      <input type="text" class="form-control form-control-dark form-control-sm mb-2" data-fg-name="${gid}" value="${getIntl(g["@name"] || {}, currentLanguage)}">
+      <label class="form-label small text-muted-2">Возможности в группе</label>
+      ${memberRows || "<p class=\"text-muted-2 small\">Нет фич</p>"}`;
+    list.appendChild(div);
+    div.querySelector(`[data-fg-name="${gid}"]`).addEventListener("input", e => { if (!g["@name"]) g["@name"] = {}; setIntl(g["@name"], currentLanguage, e.target.value); debouncedUpdateJson(); });
+    div.querySelector(`[data-fg-type="${gid}"]`).addEventListener("change", e => { g["@type"] = e.target.value; renderFeatureGroups(); debouncedUpdateJson(); });
+    div.querySelectorAll(`[data-gid="${gid}"]`).forEach(cb => {
+      if (cb.type !== "checkbox") return;
+      cb.addEventListener("change", () => {
+        g["@features"] = [...div.querySelectorAll(`[data-gid="${gid}"]`)].filter(x => x.type === "checkbox" && x.checked).map(x => x.dataset.fid);
+        if (isRadio && g["@standard"] && !g["@features"].includes(g["@standard"])) delete g["@standard"];
+        debouncedUpdateJson();
+      });
+    });
+    div.querySelectorAll(`[data-set-std="${gid}"]`).forEach(badge => {
+      badge.addEventListener("click", () => {
+        const fid = badge.dataset.stdFid;
+        if (!(g["@features"] || []).includes(fid)) { toast("Сначала включите фичу в группе", "error"); return; }
+        g["@standard"] = fid;
+        renderFeatureGroups(); debouncedUpdateJson();
+      });
+    });
+    div.querySelector(`[data-del-grp="${gid}"]`).addEventListener("click", () => {
+      delete model["@feature_groups"][gid]; renderFeatureGroups(); debouncedUpdateJson();
+    });
+  });
+}
 
-    // Add Icon
-    if (modIconFile) {
-        zip.file("icon.png", modIconFile);
+function renderGroups_side() {
+  if (document.getElementById("objects-pane").classList.contains("show")) renderGroupsTab();
+}
+
+function renderGroupsTab() {
+  const bucket = getObjectBucket();
+  const groupKeys = tableKeysInBucket(bucket);
+  const sel = document.getElementById("group-selector");
+  sel.innerHTML = "";
+  if (!groupKeys.length) {
+    document.getElementById("selected-group-pane").innerHTML = "<p class=\"text-muted-2 text-center\">Нет добавленных таблиц объектов</p>";
+    return;
+  }
+  if (activeGroupKey && !groupKeys.includes(activeGroupKey)) activeGroupKey = groupKeys[0];
+  if (!activeGroupKey) activeGroupKey = groupKeys[0];
+  groupKeys.forEach(k => {
+    const btn = document.createElement("span");
+    btn.className = "group-tab-btn" + (k === activeGroupKey ? " active" : "");
+    btn.innerHTML = `${k} <button type="button" class="group-tab-remove" title="Удалить таблицу" data-rm-grp="${k}">×</button>`;
+    btn.addEventListener("click", e => {
+      if (e.target.closest("[data-rm-grp]")) return;
+      activeGroupKey = k; renderGroupsTab();
+    });
+    btn.querySelector("[data-rm-grp]").addEventListener("click", ev => {
+      ev.stopPropagation();
+      const kk = ev.target.dataset.rmGrp;
+      showConfirm(`Удалить таблицу "${kk}"?`, () => { delete bucket[kk]; if (activeGroupKey === kk) activeGroupKey = null; renderGroupsTab(); debouncedUpdateJson(); });
+    });
+    sel.appendChild(btn);
+  });
+  renderActiveGroupVirtual(activeGroupKey, bucket);
+}
+
+function renderActiveGroupVirtual(group, bucket) {
+  const pane = document.getElementById("selected-group-pane");
+  if (objectsVirtualScrollCleanup) { objectsVirtualScrollCleanup(); objectsVirtualScrollCleanup = null; }
+  pane.innerHTML = "";
+  const getNames = () => Object.keys(bucket[group] || {});
+  const addTop = document.createElement("button");
+  addTop.className = "btn btn-success glow mb-3";
+  addTop.textContent = "➕ Добавить объект";
+  addTop.addEventListener("click", () => { addObjectToGroup(group, bucket); renderGroupsTab(); });
+  pane.appendChild(addTop);
+  if (!getNames().length) {
+    const p = document.createElement("p");
+    p.className = "text-muted-2 text-center mt-2";
+    p.textContent = `Нет объектов в "${group}"`;
+    pane.appendChild(p);
+    return;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "objects-grid-wrap";
+  const grid = document.createElement("div");
+  grid.className = "objects-grid";
+  pane.appendChild(wrap);
+  wrap.appendChild(grid);
+  const ROW_H = 260;
+  const VISIBLE = 6;
+  let start = 0;
+  function paint() {
+    const objNames = getNames();
+    const objects = bucket[group] || {};
+    grid.innerHTML = "";
+    const slice = objNames.slice(start, start + VISIBLE);
+    slice.forEach(objName => paintObjectCard(grid, group, bucket, objects, objName));
+    const sp = document.createElement("div");
+    sp.className = "objects-virtual-spacer";
+    sp.textContent = `Показаны ${start + 1}–${Math.min(start + VISIBLE, objNames.length)} из ${objNames.length} (прокрутка)`;
+    grid.appendChild(sp);
+  }
+  paint();
+  const onScroll = () => {
+    const objNames = getNames();
+    start = Math.min(Math.max(0, Math.floor(wrap.scrollTop / ROW_H)), Math.max(0, objNames.length - VISIBLE));
+    paint();
+  };
+  wrap.addEventListener("scroll", onScroll);
+  objectsVirtualScrollCleanup = () => wrap.removeEventListener("scroll", onScroll);
+}
+
+function paintObjectCard(grid, group, bucket, objects, objName) {
+  const card = document.createElement("div");
+  card.className = "object-card";
+  const params = objects[objName];
+  const examples = OBJECT_EXAMPLES_BY_GROUP[group] || ["*"];
+  let selectHtml = examples[0] === "*"
+    ? `<input type="text" class="form-control form-control-dark form-control-sm obj-name-input" value="${objName.replace(/"/g, "&quot;")}">`
+    : `<select class="form-select form-select-dark form-select-sm obj-name-input">${examples.map(e => `<option value="${e}" ${e === objName ? "selected" : ""}>${e}</option>`).join("")}</select>`;
+  card.innerHTML = `
+    <div class="mb-2">
+      <label class="form-label small text-muted-2">Имя объекта</label>
+      ${selectHtml}
+    </div>
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+      <button type="button" class="btn btn-sm btn-primary flex-grow-1 add-param-btn">➕ Параметр</button>
+      <button type="button" class="btn btn-sm btn-outline-danger flex-grow-1 del-obj-btn">🗑️ Удалить</button>
+    </div>
+    <div class="params-container d-flex flex-column gap-2"></div>`;
+  grid.appendChild(card);
+  const nameInput = card.querySelector(".obj-name-input");
+  nameInput.addEventListener("change", e => {
+    const newName = e.target.value;
+    if (newName !== objName && !bucket[group][newName]) {
+      bucket[group][newName] = bucket[group][objName];
+      delete bucket[group][objName];
+      renderGroupsTab(); debouncedUpdateJson();
     }
+  });
+  card.querySelector(".del-obj-btn").addEventListener("click", () => {
+    showConfirm(`Удалить объект "${objName}"?`, () => {
+      delete bucket[group][objName];
+      if (!Object.keys(bucket[group]).length) delete bucket[group];
+      renderGroupsTab(); debouncedUpdateJson();
+    });
+  });
+  card.querySelector(".add-param-btn").addEventListener("click", () => {
+    const avail = PARAMS_BY_GROUP[group] || [];
+    if (!avail.length) { toast("Нет параметров для этой группы", "error"); return; }
+    showParamModal(avail, param => {
+      if (bucket[group][objName][param] !== undefined) { toast("Параметр уже добавлен", "error"); return; }
+      const t = TYPE_BY_PARAM_BY_GROUP[group]?.[param] || "str";
+      bucket[group][objName][param] = t === "bool" ? false : t === "int" ? 0 : "";
+      renderGroupsTab(); debouncedUpdateJson();
+    });
+  });
+  const pc = card.querySelector(".params-container");
+  Object.keys(params).forEach(pName => {
+    const pType = TYPE_BY_PARAM_BY_GROUP[group]?.[pName] || "str";
+    const pill = document.createElement("div");
+    pill.className = "param-pill";
+    let inputHtml = "";
+    if (pType === "bool") inputHtml = `<select class="form-select form-select-dark form-select-sm param-input"><option value="true" ${params[pName] ? "selected" : ""}>true</option><option value="false" ${!params[pName] ? "selected" : ""}>false</option></select>`;
+    else if (pType === "int") inputHtml = `<input type="number" class="form-control form-control-dark form-control-sm param-input" value="${params[pName] || 0}">`;
+    else inputHtml = `<input type="text" class="form-control form-control-dark form-control-sm param-input" value="${String(params[pName] ?? "").replace(/"/g, "&quot;")}">`;
+    pill.innerHTML = `<div class="d-flex align-items-center justify-content-between"><span class="param-name">${pName}</span><button type="button" class="remove-value-btn-param" style="position:static;margin-left:auto">×</button></div>${inputHtml}`;
+    pc.appendChild(pill);
+    pill.querySelector(".param-input").addEventListener("change", e => {
+      const v = e.target.value;
+      bucket[group][objName][pName] = pType === "bool" ? v === "true" : pType === "int" ? parseInt(v, 10) || 0 : v;
+      debouncedUpdateJson();
+    });
+    pill.querySelector(".remove-value-btn-param").addEventListener("click", () => {
+      delete bucket[group][objName][pName]; renderGroupsTab(); debouncedUpdateJson();
+    });
+  });
+}
 
-    // Add files preserving their folder names in root
-    if (files.length > 0) {
-        files.forEach(item => {
-            const folder = zip.folder(item.folder);
-            folder.file(item.file.name, item.file);
-        });
-    }
+function addObjectToGroup(group, bucket) {
+  if (!bucket[group]) bucket[group] = {};
+  const ex = OBJECT_EXAMPLES_BY_GROUP[group] || ["*"];
+  const base = ex[0] === "*" ? "NewObject" : ex[0];
+  let name = base, i = 1;
+  while (bucket[group][name]) name = base + i++;
+  bucket[group][name] = {};
+  debouncedUpdateJson();
+}
 
-    const content = await zip.generateAsync({ type: "blob" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(content);
-    link.download = "mod.zip";
-    link.click();
+document.getElementById("add-object-btn").addEventListener("click", () => {
+  const group = document.getElementById("add-object-group").value.trim();
+  if (!group) { toast("Выберите таблицу", "error"); return; }
+  if (!GROUP_KEYS.includes(group)) { toast("Неизвестная таблица: " + group, "error"); return; }
+  const bucket = getObjectBucket();
+  if (!bucket[group]) bucket[group] = {};
+  addObjectToGroup(group, bucket);
+  activeGroupKey = group;
+  renderGroupsTab();
 });
 
+function createSearchableDropdown(inp, opts, items, init = "") {
+  inp.value = init;
+  let filtered = items;
+  const render = () => {
+    opts.innerHTML = "";
+    if (!filtered.length) { opts.innerHTML = "<div class=\"option-item text-muted-2\">Нет результатов</div>"; return; }
+    filtered.forEach(item => {
+      const d = document.createElement("div"); d.className = "option-item"; d.textContent = item;
+      d.addEventListener("click", () => { inp.value = item; opts.style.display = "none"; });
+      opts.appendChild(d);
+    });
+  };
+  inp.addEventListener("focus", () => { opts.style.display = "block"; render(); });
+  inp.addEventListener("input", () => { filtered = items.filter(x => x.toLowerCase().includes(inp.value.toLowerCase())); render(); });
+  document.addEventListener("click", e => { if (!inp.contains(e.target) && !opts.contains(e.target)) opts.style.display = "none"; });
+}
 
+function showParamModal(params, onSelect) {
+  const id = "pm-" + Math.random().toString(36).slice(2);
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="modal fade" id="${id}" tabindex="-1"><div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content soft"><div class="modal-header border-0">
+    <h5 class="modal-title">Выбрать параметр</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div><div class="modal-body">
+    <input type="text" class="form-control form-control-dark mb-2" id="${id}-search" placeholder="Поиск...">
+    <div style="max-height:200px;overflow-y:auto" id="${id}-list"></div>
+    <input type="hidden" id="${id}-val" value="${params[0]}">
+    </div><div class="modal-footer border-0">
+    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+    <button type="button" class="btn btn-primary" id="${id}-ok">Добавить</button>
+    </div></div></div></div>`);
+  const mel = document.getElementById(id);
+  const list = document.getElementById(id + "-list");
+  params.forEach(p => {
+    const div = document.createElement("div");
+    div.className = "option-item";
+    div.style.cssText = "padding:8px 12px;cursor:pointer;border-radius:8px";
+    div.textContent = p;
+    div.addEventListener("click", () => { document.getElementById(id + "-val").value = p; });
+    list.appendChild(div);
+  });
+  const modal = new bootstrap.Modal(mel);
+  modal.show();
+  document.getElementById(id + "-search").addEventListener("input", e => {
+    const q = e.target.value.toLowerCase();
+    list.querySelectorAll(".option-item").forEach(el => { el.style.display = el.textContent.toLowerCase().includes(q) ? "block" : "none"; });
+  });
+  document.getElementById(id + "-ok").addEventListener("click", () => { onSelect(document.getElementById(id + "-val").value); modal.hide(); });
+  mel.addEventListener("hidden.bs.modal", () => mel.remove());
+}
 
-importBtn.addEventListener("click", () => importZipInput.click());
-resetDataBtn.addEventListener("click", resetDataAndReload);
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (!lines.length) return { headers: [], rows: [] };
+  const headers = parseCsvLine(lines[0]);
+  const rows = lines.slice(1).map(l => parseCsvLine(l));
+  return { headers, rows };
+}
+function parseCsvLine(line) {
+  const result = []; let cur = "", inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"' && !inQ) inQ = true;
+    else if (c === '"' && inQ) { if (line[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+    else if (c === "," && !inQ) { result.push(cur); cur = ""; }
+    else cur += c;
+  }
+  result.push(cur); return result;
+}
 
-importZipInput.addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+function populateCsvSelect() {
+  const sel = document.getElementById("csv-table-select");
+  const prev = sel.value;
+  const names = Object.keys(csvData);
+  sel.innerHTML = "<option value=\"\">— выбрать таблицу —</option>";
+  names.forEach(n => { const o = document.createElement("option"); o.value = n; o.textContent = n + ".csv"; sel.appendChild(o); });
+  if (prev && names.includes(prev)) sel.value = prev;
+}
 
+document.getElementById("load-csv-btn").addEventListener("click", async () => {
+  const name = document.getElementById("csv-table-select").value;
+  if (!name) { toast("Выберите таблицу", "error"); return; }
+  if (csvData[name]) { currentCsvName = name; renderCsvTableVirtual(csvData[name]); return; }
+  const tryUrls = [`csvs/csv_logic/${name}.csv`, `csvs/${name}.csv`];
+  for (const url of tryUrls) {
     try {
-        const zip = await JSZip.loadAsync(file);
-        const newModel = {};
-        const newFiles = [];
-        let newModIconFile = null;
-
-        const jsonFile = zip.file("content.json");
-        if (jsonFile) {
-            const content = await jsonFile.async("string");
-            const parsedJson = JSON.parse(content);
-            Object.assign(newModel, parsedJson);
-            
-            // Fix for multilinguality issue
-            if (typeof newModel["@title"] === "string") {
-                newModel["@title"] = { [currentLanguage.toUpperCase()]: newModel["@title"] };
-            }
-            if (typeof newModel["@description"] === "string") {
-                newModel["@description"] = { [currentLanguage.toUpperCase()]: newModel["@description"] };
-            }
-        }
-
-        const iconFile = zip.file("icon.png");
-        if (iconFile) {
-            const blob = await iconFile.async("blob");
-            newModIconFile = new File([blob], "icon.png", { type: "image/png" });
-            const img = new Image();
-            img.src = URL.createObjectURL(newModIconFile);
-            img.onload = () => {
-                iconPreview.src = img.src;
-                iconPreview.classList.remove("d-none");
-                removeIconButton.classList.remove("d-none");
-            };
-        }
-
-        // --- Corrected logic for iterating through zip files ---
-        zip.forEach(async (relativePath, zipEntry) => {
-            if (!zipEntry.dir && relativePath !== "content.json" && relativePath !== "icon.png") {
-                const parts = relativePath.split('/');
-                const folder = parts[0];
-                const fileName = parts[1];
-                if (KNOWN_FOLDERS.includes(folder)) {
-                    const blob = await zipEntry.async("blob");
-                    const fileObj = new File([blob], fileName);
-                    newFiles.push({
-                        file: fileObj,
-                        folder: folder
-                    });
-                }
-            }
-        });
-
-        // Small delay to ensure all files are processed before re-rendering
-        setTimeout(async () => {
-            model = newModel;
-            files = newFiles;
-            modIconFile = newModIconFile;
-            loadMeta(model);
-            
-            await clearIndexedDb();
-            if (modIconFile) await saveFileToDb(modIconFile, 'modIcon', null);
-            for (const f of files) {
-                await saveFileToDb(f.file, 'modFile', f.folder);
-            }
-
-            repaint();
-            autoSave();
-
-            showAlert("Мод успешно импортирован!");
-        }, 500);
-
-    } catch (error) {
-        console.error("Error importing ZIP:", error);
-        showAlert("Не удалось импортировать ZIP-файл. Пожалуйста, проверьте формат файла.");
-    } finally {
-        importZipInput.value = "";
-    }
+      const resp = await fetch(url, { cache: "no-store" });
+      if (resp.ok) {
+        const text = await resp.text();
+        csvData[name] = parseCSV(text);
+        await saveCsvToDb(name, text);
+        currentCsvName = name;
+        renderCsvTableVirtual(csvData[name]);
+        toast(name + ".csv загружен", "success");
+        return;
+      }
+    } catch (e) {}
+  }
+  toast("Не удалось загрузить CSV", "error");
 });
 
-formatBtn.addEventListener("click", () => {
-    try {
-        const formatted = JSON.stringify(JSON.parse(cm.getValue()), null, 2);
-        cm.setValue(formatted);
-        codeError.classList.add("d-none");
-    } catch (e) {
-        codeError.textContent = "Невозможно отформатировать, неверный JSON.";
-        codeError.classList.remove("d-none");
-    }
+document.getElementById("csv-upload-input").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const name = f.name.replace(/\.csv$/i, "");
+  const text = await f.text();
+  csvData[name] = parseCSV(text);
+  await saveCsvToDb(name, text);
+  populateCsvSelect();
+  document.getElementById("csv-table-select").value = name;
+  currentCsvName = name;
+  renderCsvTableVirtual(csvData[name]);
+  toast("CSV загружен локально", "success");
+  e.target.value = "";
 });
 
-applyBtn.addEventListener("click", () => {
-    try {
-        const newModel = JSON.parse(cm.getValue());
-        model = newModel;
-        repaint();
-        showAlert("Изменения применены!");
-        codeError.classList.add("d-none");
-        mainTabs.show();
-        autoSave();
-    } catch (e) {
-        codeError.textContent = "Не удалось применить, неверный JSON: " + e.message;
-        codeError.classList.remove("d-none");
-    }
+function renderCsvTableVirtual(data) {
+  if (csvVirtualScrollCleanup) { csvVirtualScrollCleanup(); csvVirtualScrollCleanup = null; }
+  const table = document.getElementById("csv-table");
+  const wrap = document.getElementById("csv-table-scroll");
+  table.innerHTML = "";
+  const { headers, rows } = data;
+  const thead = document.createElement("thead");
+  const htr = document.createElement("tr");
+  htr.appendChild(Object.assign(document.createElement("th"), { textContent: "#" }));
+  headers.forEach(h => { htr.appendChild(Object.assign(document.createElement("th"), { textContent: h })); });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  table.appendChild(tbody);
+  const ROW_H = 32;
+  const vis = Math.min(40, Math.max(12, Math.ceil((wrap.clientHeight || 400) / ROW_H) + 4));
+  let start = 0;
+  function paint() {
+    tbody.innerHTML = "";
+    const slice = rows.slice(start, start + vis);
+    slice.forEach((row, si) => {
+      const ri = start + si;
+      const tr = document.createElement("tr");
+      const td0 = document.createElement("td"); td0.textContent = row[0] || String(ri); tr.appendChild(td0);
+      headers.forEach((h, ci) => {
+        const td = document.createElement("td");
+        const inp = document.createElement("input");
+        inp.className = "table-cell-input";
+        inp.value = row[ci] || "";
+        inp.addEventListener("input", e => { data.rows[ri][ci] = e.target.value; });
+        td.appendChild(inp); tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    const hint = document.getElementById("csv-virtual-hint");
+    if (hint) hint.textContent = `Строки ${start + 1}–${Math.min(start + vis, rows.length)} из ${rows.length} (прокрутка для подгрузки)`;
+  }
+  paint();
+  const onScroll = () => {
+    start = Math.min(Math.max(0, Math.floor(wrap.scrollTop / ROW_H)), Math.max(0, rows.length - vis));
+    paint();
+  };
+  wrap.addEventListener("scroll", onScroll);
+  csvVirtualScrollCleanup = () => wrap.removeEventListener("scroll", onScroll);
+  document.getElementById("csv-editor-area").classList.remove("d-none");
+  document.getElementById("csv-empty-state").classList.add("d-none");
+}
+
+document.getElementById("apply-csv-btn").addEventListener("click", () => {
+  if (!currentCsvName || !csvData[currentCsvName]) { toast("Нет загруженной таблицы", "error"); return; }
+  const { headers, rows } = csvData[currentCsvName];
+  if (!headers.length) { toast("Таблица пустая", "error"); return; }
+  const patch = {};
+  rows.forEach(row => {
+    const objName = row[0]; if (!objName) return;
+    patch[objName] = {};
+    headers.forEach((h, i) => { if (i === 0) return; if (row[i] !== undefined && row[i] !== "") patch[objName][h] = row[i]; });
+    if (!Object.keys(patch[objName]).length) delete patch[objName];
+  });
+  const bucket = getObjectBucket();
+  bucket[currentCsvName] = patch;
+  debouncedUpdateJson();
+  toast("CSV применён к " + (objectScope || "root"), "success");
+  if (activeGroupKey === currentCsvName) renderGroupsTab();
 });
+
+document.getElementById("format-json").addEventListener("click", () => {
+  try { cm.setValue(JSON.stringify(JSON.parse(cm.getValue()), null, 2)); }
+  catch (e) { showAlert("Ошибка форматирования"); }
+});
+document.getElementById("apply-json").addEventListener("click", () => {
+  try {
+    const parsed = JSON.parse(cm.getValue());
+    ["@title", "@description"].forEach(k => { if (typeof parsed[k] === "string") parsed[k] = { EN: parsed[k] }; });
+    rootPatchData = {};
+    featureFileData = {};
+    model = { "@title": {}, "@description": {}, "@author": "", "@version": "1.0.0", "@features": {}, "@feature_groups": {}, "@root": "", "@patches": [], "@categories": [] };
+    migrateLegacyModelIntoPatches(parsed);
+    sanitizeTopModel();
+    for (const fid of Object.keys(model["@features"] || {})) {
+      const fe = model["@features"][fid];
+      for (const x of Object.keys(fe || {})) if (x.startsWith("_")) delete fe[x];
+      ensureFeatureData(fid);
+    }
+    loadMeta(model); renderFiles(); updateObjectScopeSelect(); populateFeatureJsonSelect(); populateFileModdataScopeSelect();
+    renderGroupsTab();
+    syncFeatureJsonEditor();
+    document.getElementById("code-error").classList.add("d-none");
+    autoSave(); toast("content.json применён", "success");
+  } catch (e) {
+    const el = document.getElementById("code-error");
+    el.textContent = "Ошибка JSON: " + e.message;
+    el.classList.remove("d-none");
+  }
+});
+
+function mergePatchObjectIntoBucket(bucket, parsed) {
+  for (const k of Object.keys(parsed || {})) {
+    if (typeof parsed[k] === "object" && parsed[k] !== null && !Array.isArray(parsed[k])) bucket[k] = JSON.parse(JSON.stringify(parsed[k]));
+  }
+}
+
+document.getElementById("export-btn").addEventListener("click", async () => {
+  const zip = new JSZip();
+  syncPatchesField();
+  zip.file("content.json", JSON.stringify(generateContentJson(), null, 2));
+  if (modIconFile) zip.file("icon.png", modIconFile);
+  const rootHas = Object.keys(rootPatchData).some(t => {
+    const b = rootPatchData[t];
+    return b && typeof b === "object" && Object.keys(b).length > 0;
+  });
+  if (rootHas) zip.file(PATH_ROOT_JSON, JSON.stringify(rootPatchData, null, 2));
+  for (const fid of Object.keys(model["@features"] || {})) {
+    const fd = featureFileData[fid];
+    if (fd && typeof fd === "object" && Object.keys(fd).length > 0) zip.file(pathFeatureJson(fid), JSON.stringify(fd, null, 2));
+  }
+  files.forEach(item => {
+    const path = item.zipPath || (item.subfolder ? `${item.folder}/${item.subfolder}/${item.file.name}` : `${item.folder}/${item.file.name}`);
+    zip.file(path, item.file);
+  });
+  const blob = await zip.generateAsync({ type: "blob" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "mod.zip";
+  a.click();
+  toast("ZIP готов", "success");
+});
+
+document.getElementById("import-btn").addEventListener("click", () => document.getElementById("import-zip").click());
+document.getElementById("import-zip").addEventListener("change", async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    const zip = await JSZip.loadAsync(file);
+    const jf = zip.file("content.json");
+    if (!jf) throw new Error("content.json не найден");
+    const parsed = JSON.parse(await jf.async("string"));
+    ["@title", "@description"].forEach(k => { if (typeof parsed[k] === "string") parsed[k] = { EN: parsed[k] }; });
+    rootPatchData = {};
+    featureFileData = {};
+    model = { "@title": {}, "@description": {}, "@author": "", "@version": "1.0.0", "@features": {}, "@feature_groups": {}, "@root": "", "@patches": [], "@categories": [] };
+    for (const k of Object.keys(parsed)) {
+      if (k.startsWith("@")) model[k] = parsed[k];
+      else if (parsed[k] && typeof parsed[k] === "object") rootPatchData[k] = JSON.parse(JSON.stringify(parsed[k]));
+    }
+    sanitizeTopModel();
+    for (const fid of Object.keys(model["@features"] || {})) {
+      const fe = model["@features"][fid];
+      for (const x of Object.keys(fe || {})) if (x.startsWith("_")) delete fe[x];
+    }
+    const norm = p => p.replace(/^\/+/, "").replace(/\\/g, "/");
+    const loadPatch = async (relPath) => {
+      const n = norm(relPath);
+      const f = zip.file(relPath) || zip.file(n) || zip.file(n.split("/").join("/"));
+      if (!f) return null;
+      try { return JSON.parse(await f.async("string")); } catch (err) { return null; }
+    };
+    const patches = model["@patches"] || [];
+    for (const p of patches) {
+      const base = norm(p).split("/").pop().replace(/\.json$/i, "");
+      const data = await loadPatch(p);
+      if (!data) continue;
+      if (base === "root" || norm(p).endsWith("root.json")) mergePatchObjectIntoBucket(rootPatchData, data);
+      else if (model["@features"] && model["@features"][base]) featureFileData[base] = data;
+      else mergePatchObjectIntoBucket(rootPatchData, data);
+    }
+    const extraJson = [];
+    zip.forEach((path, entry) => {
+      if (entry.dir || !path.toLowerCase().endsWith(".json")) return;
+      const n = norm(path);
+      if (n === "content.json") return;
+      if (n.startsWith("json/moddata/json/")) extraJson.push({ n, entry });
+    });
+    for (const { n, entry } of extraJson) {
+      const base = n.split("/").pop().replace(/\.json$/i, "");
+      let data;
+      try { data = JSON.parse(await entry.async("string")); } catch (e) { continue; }
+      if (base === "root") mergePatchObjectIntoBucket(rootPatchData, data);
+      else if (model["@features"] && model["@features"][base]) featureFileData[base] = data;
+    }
+    const iconFile = zip.file("icon.png");
+    if (iconFile) {
+      const blob = await iconFile.async("blob");
+      modIconFile = new File([blob], "icon.png", { type: "image/png" });
+      showIconPreview(URL.createObjectURL(modIconFile));
+      await dbPut(STORE_NAME, { name: "icon.png", file: modIconFile, type: "modIcon", folder: null });
+    }
+    files = [];
+    const ps = [];
+    zip.forEach((path, entry) => {
+      if (entry.dir || path === "content.json" || path === "icon.png") return;
+      const n = norm(path);
+      if (n.startsWith("json/moddata/json/") && n.toLowerCase().endsWith(".json")) return;
+      if (n.startsWith("json/moddata/")) {
+        const parts = path.split("/");
+        const fn = parts[parts.length - 1];
+        ps.push(entry.async("blob").then(blob => { files.push({ file: new File([blob], fn), folder: "json", zipPath: n }); }));
+        return;
+      }
+      const parts = path.split("/");
+      if (parts.length >= 2 && KNOWN_FOLDERS.includes(parts[0])) {
+        ps.push(entry.async("blob").then(blob => {
+          const f = new File([blob], parts.slice(1).join("/"));
+          files.push({ file: f, folder: parts[0], zipPath: null });
+        }));
+      }
+    });
+    await Promise.all(ps);
+    await dbClear(STORE_NAME);
+    if (modIconFile) await dbPut(STORE_NAME, { name: "icon.png", file: modIconFile, type: "modIcon", folder: null });
+    for (const f of files) await dbPut(STORE_NAME, { name: f.file.name, file: f.file, type: "modFile", folder: f.folder, zipPath: f.zipPath || null });
+    loadMeta(model); renderFiles(); updateObjectScopeSelect(); populateFeatureJsonSelect(); populateFileModdataScopeSelect(); renderGroupsTab(); debouncedUpdateJson();
+    toast("Мод импортирован", "success");
+  } catch (err) { toast("Ошибка импорта: " + err.message, "error"); }
+  finally { e.target.value = ""; }
+});
+
+document.getElementById("reset-data-btn").addEventListener("click", () => {
+  showConfirm("Сбросить все данные?", async () => {
+    localStorage.clear();
+    await dbClear(STORE_NAME);
+    await dbClear(CSV_STORE);
+    await dbClear(STATE_STORE);
+    window.location.reload();
+  });
+});
+
+function showConfirm(msg, onOk) {
+  const id = "conf-" + Math.random().toString(36).slice(2);
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="modal fade" id="${id}" tabindex="-1"><div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content soft"><div class="modal-body pt-4 text-center">${msg}</div>
+    <div class="modal-footer border-0 justify-content-center gap-2">
+    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+    <button type="button" class="btn btn-danger" id="${id}-ok">Подтвердить</button>
+    </div></div></div></div>`);
+  const mel = document.getElementById(id);
+  const modal = new bootstrap.Modal(mel);
+  modal.show();
+  document.getElementById(id + "-ok").addEventListener("click", () => { onOk(); modal.hide(); });
+  mel.addEventListener("hidden.bs.modal", () => mel.remove());
+}
+function showAlert(msg) { toast(msg, "info"); }

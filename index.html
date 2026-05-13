@@ -3,174 +3,342 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Генератор модов</title>
-  <link rel="manifest" href="manifest.json">
+  <title>Генератор модов Null's Brawl</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/material-darker.min.css">
-  <link rel="stylesheet" href="style.css?v=1.4" />
 
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
 </head>
 <body class="d-flex flex-column min-vh-100">
 
-  <header class="text-center py-4">
-    <h1 class="display-6 fw-bold">Генератор модов</h1>
-    <p class="text-muted-2 mb-0">Всё, что нужно мододелу — красиво и быстро ✨</p>
-  </header>
+<div class="toast-container" id="toast-container"></div>
 
-  <main class="flex-fill d-flex justify-content-center align-items-start">
-    <div class="container-fluid">
-      <ul class="nav nav-pills frosted mb-3 justify-content-center" id="mainTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-          <button class="nav-link active" id="visual-tab" data-bs-toggle="pill" data-bs-target="#visual-pane" type="button" role="tab">Визуально</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="code-tab" data-bs-toggle="pill" data-bs-target="#code-pane" type="button" role="tab">Код (.json)</button>
-        </li>
-      </ul>
+<header class="text-center py-3 px-3">
+  <h1 class="fw-bold mb-1" style="font-size:1.6rem">🎮 Генератор модов <span style="color:var(--accent)">Null's Brawl</span></h1>
+  <p class="text-muted-2 mb-2 small">Создавай моды быстро и красиво ✨</p>
+</header>
 
-      <div class="tab-content" id="tabContent">
+<main class="flex-fill">
+  <div class="container-fluid px-2 px-md-3">
+    <ul class="nav nav-pills frosted mb-3 justify-content-center" id="mainTabs" role="tablist">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#visual-pane" type="button">Основное</button></li>
+      <li class="nav-item"><button class="nav-link" id="features-tab" data-bs-toggle="pill" data-bs-target="#features-pane" type="button">Возможности</button></li>
+      <li class="nav-item"><button class="nav-link" id="objects-tab" data-bs-toggle="pill" data-bs-target="#objects-pane" type="button">Объекты</button></li>
+      <li class="nav-item"><button class="nav-link" id="tables-tab" data-bs-toggle="pill" data-bs-target="#tables-pane" type="button">Таблицы</button></li>
+      <li class="nav-item"><button class="nav-link" id="code-tab" data-bs-toggle="pill" data-bs-target="#code-pane" type="button">JSON</button></li>
+    </ul>
 
-        <div class="tab-pane fade show active" id="visual-pane" role="tabpanel" aria-labelledby="visual-tab">
-          <div class="row justify-content-center g-4">
+    <div class="tab-content" id="tabContent">
 
-            <div class="col-12 col-lg-7 d-flex flex-column gap-3">
+      <!-- ===================== TAB: ОСНОВНОЕ ===================== -->
+      <div class="tab-pane fade show active" id="visual-pane" role="tabpanel">
+        <div class="row g-3 justify-content-center">
+          <div class="col-12 col-lg-8 d-flex flex-column gap-3">
 
-              <div class="card soft">
-                <div class="card-body">
-                  <h5 class="section-title">Предпросмотр JSON</h5>
-                  <div id="meta-preview" class="meta-preview mb-3 d-none">
-                    <h5 id="preview-title" class="preview-title"></h5>
-                    <p id="preview-description" class="preview-description"></p>
-                    <p id="preview-author" class="preview-author"></p>
-                  </div>
-                  <pre class="preview-pre"><code id="json-preview" class="language-json"></code></pre>
-                </div>
-              </div>
-
-              <div class="card soft">
-                <div class="card-body">
-                  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-                    <h5 class="section-title mb-0">Мета-информация</h5>
-                    <div class="d-flex align-items-center gap-2">
+            <!-- Preview -->
+            <div class="card soft">
+              <div class="card-body p-0">
+                <div class="mod-preview" id="mod-preview">
+                  <div class="mod-preview-content">
+                    <div class="mod-preview-header">
+                      <div class="preview-no-icon" id="preview-icon-placeholder">🎮</div>
+                      <img id="preview-icon" src="" alt="" class="mod-preview-icon d-none">
                       <div>
-                        <label for="language-select" class="form-label subtle mb-0">Язык</label>
-                        <select id="language-select" class="form-select form-select-sm form-select-dark d-inline-block w-auto"></select>
+                        <div class="preview-title" id="preview-mod-title">Название мода</div>
+                        <div class="preview-author" id="preview-mod-author">Автор: Не указан</div>
                       </div>
-                      <small class="text-warning fw-semibold" style="max-width: 220px;">
-                        Если у вас 1 язык — используйте EN (требование Null's Brawl Mods)
-                      </small>
                     </div>
-                  </div>
-                  <div class="row g-2">
-                    <div class="col-12 col-md-6">
-                      <label class="form-label subtle">@title</label>
-                      <input type="text" id="meta-title" class="form-control form-control-dark" placeholder="Название мода">
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <label class="form-label subtle">@author</label>
-                      <input type="text" id="meta-author" class="form-control form-control-dark" placeholder="Автор">
-                    </div>
-                    <div class="col-12">
-                      <label class="form-label subtle">@description</label>
-                      <textarea id="meta-description" class="form-control form-control-dark" rows="3" placeholder="Описание мода"></textarea>
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <label class="form-label subtle">@version</label>
-                      <input type="text" id="meta-version" class="form-control form-control-dark" placeholder="1.0.0">
-                    </div>
+                    <div class="preview-description" id="preview-mod-description">Описание мода</div>
                   </div>
                 </div>
               </div>
+            </div>
 
-              <div class="card soft">
-                <div class="card-body d-flex align-items-center flex-column flex-md-row gap-3">
-                  <div class="flex-shrink-0">
-                    <img id="icon-preview" class="icon-preview d-none" src="" alt="Иконка мода">
+            <!-- Meta info -->
+            <div class="card soft">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                  <h5 class="section-title mb-0">Информация о моде</h5>
+                  <div class="d-flex align-items-center gap-2">
+                    <label for="language-select" class="form-label mb-0 small text-muted-2">Язык:</label>
+                    <select id="language-select" class="form-select form-select-sm form-select-dark d-inline-block" style="width:auto"></select>
+                    <small class="text-warning fw-semibold d-none d-sm-block" style="font-size:.75rem">Используйте EN для одного языка</small>
                   </div>
-                  <div class="flex-grow-1">
-                    <h5 class="section-title">Иконка мода</h5>
-                    <p class="text-muted-2 small">Размер: 640x640, Формат: .png</p>
-                    <label for="mod-icon" class="btn btn-outline-light d-inline-block">Загрузить иконку</label>
-                    <input type="file" id="mod-icon" class="d-none" accept="image/png">
-                    <button id="remove-icon-btn" class="btn btn-sm btn-outline-danger d-none mt-2">Удалить</button>
+                </div>
+                <div class="row g-2">
+                  <div class="col-12 col-md-6">
+                    <label class="form-label small text-muted-2">Название (@title) <span class="text-danger">*</span></label>
+                    <input type="text" id="meta-title" class="form-control form-control-dark" placeholder="Например: My Awesome Mod">
+                  </div>
+                  <div class="col-12 col-md-6">
+                    <label class="form-label small text-muted-2">Автор (@author)</label>
+                    <input type="text" id="meta-author" class="form-control form-control-dark" placeholder="Ваш никнейм">
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label small text-muted-2">Описание (@description) <span class="text-danger">*</span> <span class="text-muted-2 small">— допускается HTML</span></label>
+                    <textarea id="meta-description" class="form-control form-control-dark" rows="3" placeholder="Опишите ваш мод..."></textarea>
+                  </div>
+                  <div class="col-6 col-md-4">
+                    <label class="form-label small text-muted-2">Версия (@version)</label>
+                    <input type="text" id="meta-version" class="form-control form-control-dark" placeholder="1.0.0">
+                  </div>
+                  <div class="col-6 col-md-4">
+                    <label class="form-label small text-muted-2">Версия игры (@gv) <span class="text-muted-2 small">— необязательно</span></label>
+                    <input type="number" id="meta-gv" class="form-control form-control-dark" placeholder="не указано">
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <label class="form-label small text-muted-2">Корневая папка (@root)</label>
+                    <input type="text" id="meta-root" class="form-control form-control-dark" placeholder="">
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label small text-muted-2">Патчи (@patches) <span class="text-muted-2 small">— формируются автоматически из JSON в <code>json/moddata/json/</code></span></label>
+                    <input type="text" id="meta-patches" class="form-control form-control-dark" placeholder="" readonly style="opacity:.9">
+                  </div>
+                  <!-- Categories -->
+                  <div class="col-12">
+                    <label class="form-label small text-muted-2">Категории (@categories)</label>
+                    <div class="d-flex gap-2 flex-wrap mb-2" id="categories-display"></div>
+                    <select id="categories-select" class="form-select form-select-dark form-select-sm" style="max-width:260px">
+                      <option value="">— выбрать категорию —</option>
+                      <option value="skins">Скины</option>
+                      <option value="gameplay">Геймплей</option>
+                      <option value="maps">Карты</option>
+                      <option value="audio">Аудио</option>
+                      <option value="ui">Интерфейс</option>
+                      <option value="brawlers">Бравлеры</option>
+                      <option value="animations">Анимации</option>
+                      <option value="effects">Эффекты</option>
+                      <option value="other">Другое</option>
+                    </select>
                   </div>
                 </div>
               </div>
+            </div>
 
-              <div class="card soft">
-                <div class="card-body">
-                  <h5 class="section-title">Добавление файлов</h5>
-                  <div class="input-group mb-3">
-                    <label class="input-group-text">Папка</label>
-                    <select id="folder-select" class="form-select form-select-dark"></select>
-                  </div>
-                  <label for="file-input" class="btn btn-primary glow w-100">Выбрать файлы</label>
-                  <input type="file" id="file-input" class="d-none" multiple>
-                  <ul id="files-list" class="list-group list-group-dark mt-3"></ul>
+            <!-- Icon -->
+            <div class="card soft">
+              <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+                <div class="flex-shrink-0">
+                  <img id="icon-preview" class="icon-preview d-none" src="" alt="Иконка">
+                  <div id="icon-placeholder" class="icon-preview d-flex align-items-center justify-content-center" style="font-size:3rem;color:var(--muted)">🖼️</div>
                 </div>
-              </div>
-
-              <div class="card soft">
-                <div class="card-body">
-                  <h5 class="section-title">Редактор объектов</h5>
+                <div class="flex-grow-1">
+                  <h5 class="section-title mb-1">Иконка мода</h5>
+                  <p class="text-muted-2 small mb-2">Рекомендуется 640×640, формат .png</p>
                   <div class="d-flex gap-2 flex-wrap">
-                    <div class="custom-select-container flex-grow-1">
-                      <input type="text" id="add-object-group" class="form-control form-control-dark custom-select-input" placeholder="Поиск групп...">
-                      <div class="options-container" id="add-object-group-options"></div>
-                    </div>
-                    <button id="add-object-btn" class="btn btn-primary glow flex-shrink-0">Добавить</button>
+                    <label for="mod-icon" class="btn btn-outline-light mb-0">📁 Загрузить</label>
+                    <input type="file" id="mod-icon" class="d-none" accept="image/png,image/jpg,image/jpeg,image/webp">
+                    <button id="remove-icon-btn" class="btn btn-sm btn-outline-danger d-none">Удалить</button>
                   </div>
-                  <div id="groups-root" class="groups-root mt-3"></div>
                 </div>
               </div>
-
-
             </div>
 
-          </div>
-        </div>
-
-        <div class="tab-pane fade" id="code-pane" role="tabpanel" aria-labelledby="code-tab">
-          <div class="card soft">
-            <div class="card-body">
-              <h5 class="section-title">Редактор JSON</h5>
-              <div id="editor" class="code-editor"></div>
-              <div class="d-flex justify-content-end gap-2 mt-3">
-                <button id="format-json" class="btn btn-outline-light">Форматировать</button>
-                <button id="apply-json" class="btn btn-primary glow">Применить к визуальному</button>
+            <!-- Files -->
+            <div class="card soft">
+              <div class="card-body">
+                <h5 class="section-title mb-3">Файлы мода</h5>
+                <div class="d-flex gap-2 flex-wrap mb-3 align-items-end">
+                  <select id="folder-select" class="form-select form-select-dark flex-grow-1" style="max-width:200px"></select>
+                  <div style="max-width:220px">
+                    <label class="form-label small text-muted-2 mb-0">Каталог <code>json/moddata/files/…</code></label>
+                    <select id="file-moddata-scope" class="form-select form-select-dark form-select-sm"></select>
+                  </div>
+                  <label for="file-input" class="btn btn-primary glow mb-0">➕ Добавить файлы</label>
+                  <input type="file" id="file-input" class="d-none" multiple>
+                </div>
+                <ul id="files-list" class="list-group list-group-dark"></ul>
               </div>
-              <div id="code-error" class="mt-2 text-danger small d-none"></div>
+            </div>
+
+            <!-- objectTable download -->
+            <div class="card soft">
+              <div class="card-body">
+                <h5 class="section-title mb-1">База объектов</h5>
+                <p class="text-muted-2 small mb-3">Нужна для редактора объектов. Скачивается при первом запуске автоматически.</p>
+                <button id="download-object-table" class="btn btn-info glow w-100">🔄 Скачать / Обновить objectTable.json</button>
+                <div id="progress-container" class="d-none mt-3">
+                  <div class="progress"><div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" style="width:0%">0%</div></div>
+                </div>
+                <div id="csv-download-section" class="mt-3 d-none">
+                  <p class="text-muted-2 small mb-2">CSV-таблицы (для редактора):</p>
+                  <div class="d-flex gap-2 flex-wrap" id="csv-list"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== TAB: ВОЗМОЖНОСТИ ===================== -->
+      <div class="tab-pane fade" id="features-pane" role="tabpanel">
+        <div class="card soft mb-3">
+          <div class="card-body">
+            <h5 class="section-title mb-3">Возможности мода (@features)</h5>
+
+            <!-- Add feature form -->
+            <div class="p-3 mb-4" style="background:rgba(15,19,28,.4);border-radius:16px;border:1px solid var(--line)">
+              <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-5">
+                  <label class="form-label small text-muted-2">ID возможности</label>
+                  <input type="text" id="new-feature-id" class="form-control form-control-dark" placeholder="Например: CustomBrawlers">
+                </div>
+                <div class="col-6 col-md-3">
+                  <label class="form-label small text-muted-2">Приоритет</label>
+                  <input type="number" id="new-feature-priority" class="form-control form-control-dark" value="0">
+                </div>
+                <div class="col-6 col-md-2">
+                  <label class="form-label small text-muted-2">Вкл. по умолч.</label>
+                  <select id="new-feature-enabled" class="form-select form-select-dark">
+                    <option value="true">Да</option>
+                    <option value="false">Нет</option>
+                  </select>
+                </div>
+                <div class="col-12 col-md-2">
+                  <button id="add-feature-btn" class="btn btn-success glow w-100">Добавить</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="features-list" class="mb-4"></div>
+
+            <!-- Feature Groups -->
+            <h5 class="section-title mb-3">Группы возможностей (@feature_groups)</h5>
+            <div class="p-3 mb-3" style="background:rgba(15,19,28,.4);border-radius:16px;border:1px solid var(--line)">
+              <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-4">
+                  <label class="form-label small text-muted-2">ID группы</label>
+                  <input type="text" id="new-group-id" class="form-control form-control-dark" placeholder="Например: VisualGroup">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label small text-muted-2">Тип</label>
+                  <select id="new-group-type" class="form-select form-select-dark">
+                    <option value="DEFAULT">DEFAULT</option>
+                    <option value="RADIO_GROUP">RADIO_GROUP</option>
+                  </select>
+                </div>
+                <div class="col-12 col-md-4">
+                  <button id="add-group-btn" class="btn btn-primary glow w-100">Добавить группу</button>
+                </div>
+              </div>
+            </div>
+            <div id="feature-groups-list" class="mb-4"></div>
+
+            <!-- Raw JSON editor for features -->
+            <p class="text-muted-2 small mb-2">Для каждой возможности — отдельный JSON-файл при экспорте; ниже редактор по выбранной фиче.</p>
+            <div class="row g-2 mb-2 align-items-end">
+              <div class="col-12 col-md-6">
+                <label class="form-label small text-muted-2">Редактировать JSON фичи</label>
+                <select id="feature-json-select" class="form-select form-select-dark"></select>
+              </div>
+              <div class="col-12 col-md-6 d-flex gap-2 flex-wrap">
+                <button id="format-feature-json" class="btn btn-sm btn-outline-light">Форматировать</button>
+                <button id="apply-feature-json" class="btn btn-sm btn-primary glow">Применить в модель</button>
+              </div>
+            </div>
+            <div id="single-feature-editor" class="code-editor" style="height:360px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== TAB: ОБЪЕКТЫ ===================== -->
+      <div class="tab-pane fade" id="objects-pane" role="tabpanel">
+        <div class="card soft mb-3">
+          <div class="card-body">
+            <h5 class="section-title mb-3">Редактор объектов</h5>
+            <div class="d-flex gap-2 flex-wrap mb-3 align-items-end">
+              <div class="flex-grow-1" style="max-width:220px">
+                <label class="form-label small text-muted-2 mb-1">Область данных</label>
+                <select id="object-scope" class="form-select form-select-dark"></select>
+              </div>
+              <div class="custom-select-container flex-grow-1" style="max-width:280px">
+                <label class="form-label small text-muted-2 mb-1">Таблица</label>
+                <input type="text" id="add-object-group" class="form-control form-control-dark" placeholder="Поиск таблицы...">
+                <div class="options-container" id="add-object-group-options"></div>
+              </div>
+              <button id="add-object-btn" class="btn btn-primary glow">Добавить объект</button>
+            </div>
+
+            <!-- Group tabs -->
+            <div class="group-selector" id="group-selector"></div>
+
+            <!-- Selected group content -->
+            <div id="selected-group-pane"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== TAB: ТАБЛИЦЫ ===================== -->
+      <div class="tab-pane fade" id="tables-pane" role="tabpanel">
+        <div class="card soft mb-3">
+          <div class="card-body">
+            <h5 class="section-title mb-2">Редактор таблиц CSV</h5>
+            <p class="text-muted-2 small mb-3">Выберите CSV-таблицу, внесите изменения — они автоматически попадут в JSON (TablePatches).</p>
+            <div class="d-flex gap-2 mb-3 flex-wrap">
+              <select id="csv-table-select" class="form-select form-select-dark flex-grow-1" style="max-width:300px">
+                <option value="">— выбрать таблицу —</option>
+              </select>
+              <button id="load-csv-btn" class="btn btn-info glow">Загрузить</button>
+              <label for="csv-upload-input" class="btn btn-outline-light mb-0">📂 Загрузить локально</label>
+              <input type="file" id="csv-upload-input" class="d-none" accept=".csv">
+            </div>
+            <div id="csv-editor-area" class="d-none">
+              <p class="text-muted-2 small mb-2" id="csv-virtual-hint"></p>
+              <div class="csv-table-wrapper" id="csv-table-scroll">
+                <table class="csv-table" id="csv-table"></table>
+              </div>
+              <div class="d-flex justify-content-end mt-3">
+                <button id="apply-csv-btn" class="btn btn-success glow">Применить изменения в JSON</button>
+              </div>
+            </div>
+            <div id="csv-empty-state" class="text-center text-muted-2 py-4">
+              <div style="font-size:3rem">📊</div>
+              <p class="mt-2">Выберите или загрузите таблицу CSV</p>
             </div>
           </div>
         </div>
-
       </div>
+
+      <!-- ===================== TAB: JSON ===================== -->
+      <div class="tab-pane fade" id="code-pane" role="tabpanel">
+        <div class="card soft mb-3">
+          <div class="card-body">
+            <h5 class="section-title mb-3">Редактор JSON (только ключи @ для content.json)</h5>
+            <p class="text-muted-2 small mb-2">Таблицы объектов и тела фич хранятся в отдельных JSON под <code>json/moddata/json/</code> и попадают в ZIP через @patches.</p>
+            <div id="editor" class="code-editor"></div>
+            <div class="d-flex justify-content-end gap-2 mt-3">
+              <button id="format-json" class="btn btn-outline-light">Форматировать</button>
+              <button id="apply-json" class="btn btn-primary glow">Применить</button>
+            </div>
+            <div id="code-error" class="mt-2 text-danger small d-none"></div>
+          </div>
+        </div>
+      </div>
+
     </div>
-  </main>
-
-  <footer class="mt-auto py-3 bg-dark">
-    <div class="container d-flex justify-content-center gap-3 flex-wrap">
-      <button id="export-btn" class="btn btn-success glow">Экспорт ZIP</button>
-      <button id="import-btn" class="btn btn-warning text-dark glow">Импорт ZIP</button>
-      <button id="reset-data-btn" class="btn btn-outline-danger">Сбросить данные</button>
-      <input type="file" id="import-zip" class="d-none" accept=".zip">
-    </div>
-  </footer>
-
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="script.js?v=1.4"></script>
-
-  <div class="container text-center py-3">
-    <p class="text-muted-2 small mb-0">
-      Версия 1.4.1 (улучшения визуала)<br>
-      От <a href="https://t.me/d2rkmean">darkmean</a> & 
-      <a href="https://t.me/PEZOH3HC">ДОЛБОЕБ</a>
-    </p>    
   </div>
+</main>
+
+<footer class="mt-auto py-3" style="background:rgba(0,0,0,.3);border-top:1px solid var(--line)">
+  <div class="container d-flex justify-content-center gap-2 flex-wrap">
+    <button id="export-btn" class="btn btn-success glow">📦 Экспорт ZIP</button>
+    <button id="import-btn" class="btn btn-warning text-dark glow">📂 Импорт ZIP</button>
+    <button id="reset-data-btn" class="btn btn-outline-danger">🗑️ Сбросить</button>
+    <input type="file" id="import-zip" class="d-none" accept=".zip">
+  </div>
+  <div class="text-center mt-2">
+    <p class="text-muted-2 small mb-0">v2.0 · <a href="https://t.me/d2rkmean" style="color:var(--accent)">darkmean</a></p>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="script.js"></script>
 </body>
 </html>
